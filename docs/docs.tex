@@ -1,0 +1,715 @@
+\documentclass[notitlepage]{article}
+
+\title{LilyPad base class reference}
+\author{Artur Lidtke}
+
+\usepackage{graphicx}
+\usepackage{morefloats}
+\usepackage{fixltx2e}
+\usepackage[hidelinks]{hyperref}
+\usepackage{breakurl}
+\graphicspath{{Figures/}}
+
+\addtolength{\oddsidemargin}{-1cm}
+\addtolength{\evensidemargin}{-1cm}
+\addtolength{\textwidth}{2cm}
+
+\usepackage{listings} % code listing
+\usepackage{color}
+
+\definecolor{mygreen}{rgb}{0,0.6,0}
+\definecolor{myred}{rgb}{0.8,0.1,0.1}
+
+\lstdefinestyle{myCpp}
+{
+language=C++,
+frame=none,
+backgroundcolor={},
+breaklines=true,
+extendedchars=true,
+keywordstyle=\color{mygreen},
+numberstyle=\tiny\color{myred},
+commentstyle=\color{blue},
+basicstyle=\scriptsize\ttfamily, % the size of the fonts that are used for the code
+morekeywords={&,>},
+tabsize=2,
+moredelim=**[is][\color{red}]{@}{@} % add @ delimiter and colour the stuff between in red
+}
+
+\begin{document}
+
+\maketitle
+
+%%%%%
+\begin{abstract}
+Somebody elses code is always hard, let's break it down!
+
+\textcolor{red}
+{
+\textbf{Questions}
+\begin{itemize}
+\item Why assign boundary values to i/j = 1 and n/m-1?
+\item What does the gradientExit really mean? why when it's set to true we
+	subtract the mean value from the field at the RHS extent before adding the
+	actual BC value?
+\end{itemize}
+}
+\end{abstract}
+
+% =======================
+\section{Used Postprocessing objects}
+
+\begin{itemize}
+\item \texttt{PVector} - Cartesian vector with x and y components
+\end{itemize}
+
+% =======================
+\section{OrthoNormal}
+
+% -----------------------
+\subsection{Description}
+
+Holds information describing a line segment.
+
+% -----------------------
+\subsection{Internal fields}
+
+\begin{itemize}
+\item \texttt{<float> l} - length of the line segment
+\item \texttt{<float> nx} - normal vector x-component
+\item \texttt{<float> ny} - normal vector y-component
+\item \texttt{<float> tx} - x-tangent - unit vector between end points of the line segment
+\item \texttt{<float> ty} - y-tangent
+\item \texttt{<float> off} - normal offset - distance from the origin to the plane defined by this line segment
+\item \texttt{<float> t1} - distance of the end points projected onto the tangent
+\item \texttt{<float> t2}
+\item \texttt{<PVector> cen} - centre of the line segment in the global coordinate system
+\end{itemize}
+
+% -----------------------
+\subsection{Methods}
+
+% +++++++++++++++++++++++
+\subsubsection{Constructor}
+
+Accepts two points in space and computes all the properties of the line segment they define.
+
+\begin{lstlisting}[style=myCpp]
+OrthoNormal(PVector x1, PVector x2 )
+{
+	// length of the line segment
+	l = PVector.sub(x1,x2).mag();
+	tx = (x2.x-x1.x)/l;    		// x tangent
+	ty = (x2.y-x1.y)/l;    		// y tangent
+	t1 = x1.x*tx+x1.y*ty;  		// tangent location of point 1
+	t2 = x2.x*tx+x2.y*ty;  		// tangent location of point 2
+	nx = -ty;
+	ny = tx;     				// normal vector
+	off = x1.x*nx+x1.y*ny; 		// normal offset
+	cen = PVector.add(x1,x2);	// centriod
+	cen.div(2.);
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Distance}
+
+Computes the distance between the line described by this instance of OrthoNormal object
+and a gieven point. If no optional parameter is passed then a wrapper method is called
+which passes \texttt{projected=true}. This means that the function computes the normal
+distance from the point described by (x,y) by calling a dot product with the line nromal.
+If \texttt{projected} is set to false, first the normal distance is computed as previously.
+Then the distance between the intersection of normal direction of the line segment passing
+through the point of interest and the tangential direction of the line segment is computed.
+The return value is equal to the one computed using projected normal if the intersection
+lies on the line segment or the sum of the normal and tangential distances if the
+intersection point falls outside of the line segment.
+
+\begin{lstlisting}[style=myCpp]
+float distance( float x, float y, Boolean projected)
+{
+	float d = x*nx+y*ny-off; // normal distance to line 
+	if(projected) return d;  // |distance|_n (signed, fastest)
+
+	float d1 = x*tx+y*ty-t1; // tangent dis to start
+	float d2 = x*tx+y*ty-t2; // tangent dis to end
+
+	//    return sqrt(sq(d)+sq(max(0,-d1))+sq(max(0,d2))); // |distance|_2
+	return abs(d)+max(0,-d1)+max(0,d2);              // |distance|_1 (faster)
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{tanCoord}
+
+Returns the distance from the point of interest, (x,y), to the start of the line segment
+along its tangential direction.
+
+\begin{lstlisting}[style=myCpp]
+float tanCoord( float x, float y )
+{
+	return min( max( (x*tx+y*ty-t1)/l, 0), 1 );
+}
+\end{lstlisting}
+
+% =======================
+\section{Scale}
+
+% -----------------------
+\subsection{Description}
+
+Helps with organising display of data, allows interpolation between the actual mesh
+and the pixelated grid. In the CFD each Cartesian axis has its own scale object.
+
+% -----------------------
+\subsection{Internal fields}
+
+\begin{itemize}
+\item \texttt{<float> inS} - start of the inner scale
+\item \texttt{<float> inE} - end of the inner scale
+\item \texttt{<float> outS} - same as above but for the outer scale
+\item \texttt{<float> outE}
+\item \texttt{<float> r} - ratio between the units of the outer and inner scales
+\end{itemize}
+
+% -----------------------
+\subsection{Methods}
+
+% +++++++++++++++++++++++
+\subsubsection{Constructor}
+
+Assembles the scale from components, explicitly assinging values to each of the fields.
+
+\begin{lstlisting}[style=myCpp]
+Scale( float inS, float inE, float outS, float outE )
+{
+	this.inS  = inS;
+	this.inE  = inE;
+	this.outS = outS;
+	this.outE = outE;
+	r = (outE-outS)/(inE-inS);
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{OutB}
+
+Converts from the inner to outer scale but making sure the returned value is
+bounded between the start and end values of the outer scale.
+
+\begin{lstlisting}[style=myCpp]
+float outB( float in ){ return out(min(max(in,inS),inE));}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Out}
+
+Converts the given coordinate in the inner scale into its corresponding value
+in the outer scale.
+
+\begin{lstlisting}[style=myCpp]
+float out( float in ){ return (in-inS)*r+outS;} 
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{In}
+
+Converts a given outer scale value into the inner scale.
+
+\begin{lstlisting}[style=myCpp]
+float in( float out ){ return (out-outS)/r+inS;}
+\end{lstlisting}
+
+% =======================
+\section{Window}
+
+% -----------------------
+\subsection{Description}
+
+Helps with organising display of data, allows interpolation between the actual mesh
+and the pixelated grid.
+
+% -----------------------
+\subsection{Internal fields}
+
+\begin{itemize}
+\item \texttt{<Scale> x} - scale of the x axis
+\item \texttt{<Scale> y} - scale of the y axis
+\item \texttt{<int> x0} - beginning of the outer (display) scale in pixels for the x-axis
+\item \texttt{<int> y0} - beginning of the outer scale for the y-axis in pixels
+\item \texttt{<int> dx} - dimension of the x-axis in pixels
+\item \texttt{<int> dy} - dimension of the y-axis in pixels
+\end{itemize}
+
+% -----------------------
+\subsection{Methods}
+
+% +++++++++++++++++++++++
+\subsubsection{Constructor - from components}
+
+Assembles the scale from components, explicitly assinging values to each of the fields.
+
+\begin{lstlisting}[style=myCpp]
+Window( float n0, float m0, float dn, float dm, int x0, int y0, int dx, int dy)
+{
+	// create the scale objects for both axes allowing interpolation onto the
+	// display to be performed; inner scale is the CFD grid
+	x = new Scale(n0,n0+dn,x0,x0+dx);
+	y = new Scale(m0,m0+dm,y0,y0+dy);
+	
+	// assign the size and beginning of the display area
+	this.x0 = x0;
+	this.y0 = y0;
+	this.dx = dx;
+	this.dy = dy;
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Constructor - basic}
+
+Called by the basic LilyPad example. Only accepts the number of cells in both directions
+and starts the inner grid from index 1. Read the size of the window using
+global variables width and height, assigning both display axes to start at 0.
+
+\begin{lstlisting}[style=myCpp]
+Window( int n, int m)
+{
+	this( 1, 1, n-2, m-2, 0, 0, width, height );
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Inside}
+
+Checks if the passed point fits within the limits of the display window.
+
+\begin{lstlisting}[style=myCpp]
+boolean inside( int x, int y )
+{
+	return( x>=x0 && x<=x0+dx && y>=y0 && y<=y0+dy );
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{ix/iy}
+
+Converts from the cell index to pixel coordinate.
+
+\begin{lstlisting}[style=myCpp]
+float ix(int i){ return x.in((float)i);}
+float iy(int i){ return y.in((float)i);}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{idx/idy}
+
+Inverse conversion, used for something to do with mouse coordinates.
+\textcolor{red}{no idea why this is of any use}
+
+\begin{lstlisting}[style=myCpp]
+float idx(int i){ return i/x.r;}
+float idy(int i){ return i/y.r;}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{px/py}
+
+Convert a pixel location to a cell index.
+
+\begin{lstlisting}[style=myCpp]
+int px(float i){ return (int)(x.out(i));}
+int py(float i){ return (int)(y.out(i));}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{pdx/pdy}
+
+Inverse transfrom in the pixel axis.
+
+\textcolor{red}{no idea why this is of any use}
+\begin{lstlisting}[style=myCpp]
+int pdx(float i){ return (int)(x.r*i);}
+int pdy(float i){ return (int)(y.r*i);}
+\end{lstlisting}
+
+% =======================
+\section{Field}
+
+% -----------------------
+\subsection{Description}
+
+Holds the information necessary to manipulate a scalar field,
+such as keeping its values, advecting given a velocity field,
+taking gradients or Laplacians, interpolating, etc.
+
+% -----------------------
+\subsection{Internal fields}
+
+\begin{itemize}
+\item \texttt{<float[][]> a} - array of internal field values, shape (n,m)
+\item \texttt{<int> n, m} - number of grid points in x- and y-directions
+\item \texttt{<int> btype} - type of boundary condition \textcolor{red}{what are the numbers?}
+\item \texttt{<float> bval} - value of the boundary condition (only used in certain cases of \texttt{btype} values)
+\item \texttt{<bool> gradientExit} - \textcolor{red}{how exactly does this work?}
+\end{itemize}
+
+% -----------------------
+\subsection{Methods}
+
+% +++++++++++++++++++++++
+\subsubsection{Constructor - from components}
+
+Allocate memory to the field value array and set it equal
+to the specified boundary value, \texttt{bval}.
+
+\begin{lstlisting}[style=myCpp]
+Field( int n, int m, int btype, float bval )
+{
+	this.n = n;
+	this.m = m;
+	this.a = new float[n][m];
+	this.btype = btype;
+	this.bval = bval;
+	// sets the internal field values to bval
+	this.eq(bval);
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Laplacian}
+
+Compute second spatial derivative of the field using a 2nd order central scheme.
+
+\begin{lstlisting}[style=myCpp]
+Field laplacian ()
+{
+	// create an empty field d filled with zeros
+	Field d = new Field( n, m );
+	
+	// loop over all INTERNAL cells (mind the end stencils)
+	for ( int i=1 ; i<n-1 ; i++ )
+	{
+		for ( int j=1 ; j<m-1 ; j++ )
+		{
+			// use a 2nd order linear scheme in x- and y-directions
+			// phi''(x) = [phi(x-delta_x) - 2 phi(x) + phi(x+delta_x)] / delta_x^2
+			// recall that the code is dimensionless with
+			// the grid size being the length-scale
+			// this means we skip the delta_x and delta_y
+			// in the denominator
+			d.a[i][j] = -4*a[i][j] + a[i+1][j]
+				+ a[i-1][j] + a[i][j+1] + a[i][j-1];
+		}
+	}
+	// leave the boundary values equal to zero
+	return d;
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Gradient}
+
+Compute the first spatial derivative of the field using a 1st order backward
+scheme.
+
+\begin{lstlisting}[style=myCpp]
+VectorField gradient()
+{
+	// this will hold the grad(a) values, initialise with zeros
+	VectorField g = new VectorField(n,m,0,0);
+	
+	// loop over all internal faces
+	for ( int i=1 ; i<n-1 ; i++ )
+	{
+		for ( int j=1 ; j<m-1 ; j++ )
+		{
+			// compute the x and y derivatives using a
+			// 1st order backward scheme
+			// phi'(x) = [phi(x) - phi(x-delta_x)] / delta_x
+			g.x.a[i][j] = a[i][j]-a[i-1][j];
+			g.y.a[i][j] = a[i][j]-a[i][j-1];
+		}
+	}
+	
+	// call the vectorField method to set the boundary values
+	// this calls the Field::setBC() function on both x- and
+	// y-components of the gradient function; x-dir is given
+	// btype 1 and y-dir btype 2
+	g.setBC(); // issues?
+	return g;
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Adect}
+
+Given a velocity field at this time step, \texttt{(u,v)}, and at the previous time step,
+\texttt{(u0,v0)}, convect the scalar field in space. This uses the basic form of the scalar
+transport equation, i.e. total derivative equals zero, assuming there are no
+source terms on the RHS of the equation. To be more accurate, the function uses
+two consequtive time step values with a 2nd order Runge-Kutta method and a
+quadratic interpolation routine in space.
+
+\begin{lstlisting}[style=myCpp]
+void advect(float step, Field u, Field v, Field u0, Field v0)
+{
+	/* advect the field with the u, v velocity fields.
+	Use a first order lagrangian method:
+	Da/Dt = 0
+	which translates into:
+	a(t=dt,x,y) = a(t=0, x-dt*u(x,y), y-dt*v(x,y))
+	
+	The example code shows how diffusive this is 
+	EDIT: by using an RK2 step to find x0 and using
+	a quadratic interpolation, this method is second
+	order and nondiffuse.
+	
+	EDIT2: by treating the old and new velocities 
+	seperately, the method is second order in time.*/
+	
+	// create a copy of this field, keeping the current values
+	Field a0 = new Field(this);
+	
+	// loop over all internal cells
+	for( int i=1; i<n-1; i++)
+	{
+		for( int j=1; j<m-1; j++)
+		{
+			// select the interpolation point to be the current cell
+			float x = i;
+			float y = j;
+			// correct for boundary values if necessary
+			if(btype==1) x -= 0.5;
+			if(btype==2) y -= 0.5;
+			// get the velocities at this time step
+			float ax = -step*u.linear( x, y );
+			float ay = -step*v.linear( x, y );
+			// get the velocities at the previous time step
+			// account for the fact that the interpolation point would have
+			// "moved" back then as well
+			float bx = -step*u0.linear( x+ax, y+ay );
+			float by = -step*v0.linear( x+ax, y+ay );
+			// assume that at the new time step field value is equal to
+			// that at the previous time step at a location -dT*(u,v)
+			// perform Runge-Kutta interpolation using three data points
+			// to get the location in the field which would have been the current
+			// value one time step ago
+			// then use quadratic interpolation to get the field value there and
+			// assign it to be the field value after update
+			a[i][j] = a0.quadratic( x+0.5*(ax+bx), y+0.5*(ay+by) );
+		}
+	}
+	// correct the BCs
+	setBC();
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Quadratic}
+
+Given a point of interest, \texttt{(x0,y0)}, interpoalte the field values in space to
+get a value at that location.
+
+\begin{lstlisting}[style=myCpp]
+float quadratic( float x0, float y0)
+{
+	// correct (x0,y0) to allow for BCs
+	float x = x0, y = y0;
+	if(btype==1) x += 0.5;
+	if(btype==2) y += 0.5;
+	
+	// get the indices of cells we need
+	int i = round(x), j = round(y);
+	
+	// make sure we won't exceed the grid dimensions
+	// perform linear interpolation if we do
+	if( i>n-2 || i<1 || j>m-2 || j<1 )
+		return linear( x0, y0 );
+	
+	// to interpolate we need x and y expressed about
+	// the i-th and j-th cell
+	x -= i;
+	y -= j;
+	
+	// interpolate in the x-direction at 3 y-positions
+	float e = quadratic1D(x,a[i-1][j-1],a[i][j-1],a[i+1][j-1]);
+	float f = quadratic1D(x,a[i-1][j  ],a[i][j  ],a[i+1][j  ]);
+	float g = quadratic1D(x,a[i-1][j+1],a[i][j+1],a[i+1][j+1]);
+	
+	// use the interpolated values to interpolate in the y-direction
+	return quadratic1D(y,e,f,g);
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Quadratic 1D}
+
+Quadratic interpolation in 1D given a point of interest, \texttt{x}, and three field
+values at consecutive grid points. The scheme is bounded between the data points
+used for interpolation.
+
+\begin{lstlisting}[style=myCpp]
+float quadratic1D(float x, float e, float f, float g)
+{
+	// compute the value
+	float x2 = x*x;
+	float fx = f*(1.-x2);
+	fx += (g*(x2+x)+e*(x2-x))*0.5;
+	// bound the scheme between the specified field values
+	fx = min(fx,max(e,f,g));
+	fx = max(fx,min(e,f,g));
+	return fx;
+} 
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Linear}
+
+Basic linear interpolation of the field values at a point of interest.
+
+\begin{lstlisting}[style=myCpp]
+// Interpolate the field at point (x0,y0)
+float linear(float x0, float y0)
+{
+	// take the point of interest and make it bound between
+	// 0.5 and x_max-1.5
+	float x  = min(max(0.5,x0), n-0.5);
+	if(btype==1) x += 0.5;
+	
+	// index of the cell around which we interpolate
+	int i = min( (int)x, n-2 ); 
+	// weighting factor in the x-direction
+	float s = x-i;
+	
+	float y  = min(max(0.5,y0), m-1.5);
+	if(btype==2) y += 0.5;
+	
+	int j = min( (int)y, m-2 );
+	float t = y-j;
+	
+	// if weighting factors are zero then just pick the field value (i,j)
+	if(s==0 && t==0)
+	{
+		return a[i][j];
+	}
+	// perform linear interpolation
+	// first do in the y-direction at both x-locations we need
+	// then take the results and interpolate in the x-direction
+	else
+	{
+		return  s*(t*a[i+1][j+1]+(1-t)*a[i+1][j])+
+			(1-s)*(t*a[i  ][j+1]+(1-t)*a[i  ][j]);
+	}
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Set BC}
+
+This function takes care of all boundary condition related operations.
+First apply von Neumann (normal gradient equal to zero) in both
+x- and y-directions by setting the first and last grid point values to be equal to
+those in the second and second-last cells.
+\textcolor{red}{
+If the boundary type is set to 1 then
+}
+
+\begin{lstlisting}[style=myCpp]
+// correct the boundary conditions
+void setBC ()
+{
+	float s=0;
+	
+	// go over all y-indices
+	for (int j=0 ; j<m ; j++ )
+	{
+		// set the 0th and n-1st (first and last) field value zeros
+		// to what they are one index into the domain
+		// -> apply zero-gradient (von Neumann) BC at left and right sides
+		a[0][j]   = a[1][j];
+		a[n-1][j] = a[n-2][j];
+		
+		if(btype==1)
+		{
+			// if we have a zero-gradient type right-hand-side boundary
+			// but fixed-value inlet then prescribe the value only there
+			if(gradientExit)
+			{
+				// set inlet to fixed-value
+				a[1][j] = bval;
+				// s now holds an integral of the field values at the RHS boundary
+				if(j>0 & j<m-1)
+					s += a[n-1][j];          
+			}
+			// set the field values to the constant held in the class
+			// if we have a fixed-value type BC set
+			// do this to cells 1-into the domain (not 0 and n-1)
+			// TODO why?
+			else
+			{
+				a[1][j]   = bval;  
+				a[n-1][j] = bval;
+			}
+		}
+	}
+	
+	// go over all x-indices
+	for (int i=0 ; i<n ; i++ )
+	{
+		// apply zero-gradient in the y-direction at top and bottom
+		a[i][0]   = a[i][1];
+		a[i][m-1] = a[i][m-2];
+		
+		// if the x-direction is fixed-value then assign the values
+		if(btype==2)
+		{
+			a[i][1]   = bval;  
+			a[i][m-1] = bval;
+		}
+	}
+	
+	// set the RHS BC
+	if(gradientExit)
+	{
+		// get the average values of s
+		s /= float(m-2);
+		// remove the mean value from the RHS cell and the boundary value
+		for( int j=1; j<m-1; j++ )
+			a[n-1][j] += bval-s;
+	}
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Normal gradient}
+
+Compute gradient in a normal direction where
+\texttt{wnx} and \texttt{wny} are wall-normal x- and y-directions with their
+\texttt{VectorField::x} holding the actual values of the gradient. See the function
+\texttt{BDIM::get\_wn} for more information on how these are calculated.
+
+\begin{lstlisting}[style=myCpp]
+Field normalGrad(VectorField wnx, VectorField wny)
+{
+	// result field
+	Field g = new Field(n,m,0,0);
+	
+	// loop over all internal cells
+	for ( int i=1 ; i<n-1 ; i++ )
+	{
+		for ( int j=1 ; j<m-1 ; j++ )
+		{
+			// compute the wall-normal gradient
+			// approximate d(a)/dx_i using 2nd order central scheme
+			// [a(i+1,j)-a(i-1,j)]/(2 delta_x), where delta_x = 1.0
+			// take a dot-product with the wall-normal direction
+			g.a[i][j] = 0.5*( wnx.x.a[i][j] * (a[i+1][j]-a[i-1][j])
+				+ wny.x.a[i][j] * (a[i][j+1]-a[i][j-1]) );
+		}
+	}
+	return g;
+}
+\end{lstlisting}
+
+\end{document}
