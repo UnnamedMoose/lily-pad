@@ -7,16 +7,34 @@ Change the geometry, flow conditions, numercial parameters
  visualizations and measurments from this window. 
 
 *********************************************************/
-BDIM flow;
+
+Field p,u,v;
+
+void setup(){
+  size(400,400);
+  background(1,0,0);
+  p = new Field(100,150);
+  p.eq(1.0,40,50,40,75);
+  u = new Field(100,150,1,0.25);
+  v = new Field(100,150,2,0.2);
+}
+void draw(){
+  p.advect( 1., u, v );
+  p.display(0,1);
+}
+
+// ====================================
+// DEFAULT CODE
+/*BDIM flow;
 CircleBody body;
 FloodPlot flood;
 
 void setup(){
-  int n=(int)pow(2,6)+2; // number of grid points
+  int n=(int)pow(2,6)+2; // number of grid points - Need a multiple of 2 for the multi-grid solver
   size(400,400);         // display window size
   Window view = new Window(n,n);
 
-  body = new CircleBody(n/3,n/2,n/8,view); // define geom
+  body = new CircleBody(n/3,n/2,n/8,view); // define geometry - circle
   flow = new BDIM(n,n,1.5,body);           // solve for flow using BDIM
 //  flow = new BDIM(n,n,0,body,0.01,true);   // QUICK with adaptive dt
   flood = new FloodPlot(view);
@@ -31,5 +49,5 @@ void draw(){
   body.display();
 }
 void mousePressed(){body.mousePressed();}
-void mouseReleased(){body.mouseReleased();}
-
+void mouseReleased(){body.mouseReleased();}*/
+/*======================================*/
