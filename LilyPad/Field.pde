@@ -27,7 +27,7 @@ class Field
 	float[][] a;  
 	
 	int n,m, // number of grid points in each direction
-		btype = 0; // BC type; 0-TODO
+		btype = 0; // BC type; 0- , 1- , 2- TODO
 	float bval = 0; // BC value for Dirichlet BC
 	boolean gradientExit = false; // TODO ?
 
@@ -125,7 +125,8 @@ class Field
 		// call the vectorField method to set the boundary values
 		// this calls the Field::setBC() function on both x- and
 		// y-components of the gradient function; x-dir is given
-		// btype 1 and y-dir btype 2
+		// btype 1 and y-dir btype 2 - this makes the lhs and bottom
+		// inlets for u and v, and rhs and top outlets for u and v, respectively
 		g.setBC(); // issues?
 		return g;
 	}
@@ -162,10 +163,14 @@ class Field
 		{
 			for( int j=1; j<m-1; j++)
 			{
-				// select the interpolation point to be the current cell
+				// select the interpolation point to be the +ve face of cell 0,
+				// iterating up to -ve face of the last cell - i.e. all internal faces
 				float x = i;
 				float y = j;
 				// correct for boundary values if necessary
+				// Note: linear and quadratic interpolation methods will modify x and y by +0.5
+				// if we are using Neumann BC (1 or 2) - we want to keep interpolation
+				// points to be face centres and so we need to fool the interpolation method
 				if(btype==1) x -= 0.5;
 				if(btype==2) y -= 0.5;
 				// get the velocities at this time step
@@ -286,11 +291,14 @@ class Field
 	float linear(float x0, float y0)
 	{
 		// take the point of interest and make it bound between
-		// 0.5 and x_max-0.5
+		// 0.5 and x_max-0.5 - i.e. cell centres of 0th and N-1st cell (boundary cells)
 		float x  = min(max(0.5,x0), n-1.5);
 		if(btype==1) x += 0.5;
 	
 		// index of the cell around which we interpolate
+		// make sure we do not pick N-1st cell (the last one)
+		// casting <float>x to <int> will round down to the nearest integer
+		// so that x should be between i and i+1
 		int i = min( (int)x, n-2 ); 
 		// weighting factor in the x-direction
 		float s = x-i;
@@ -350,7 +358,7 @@ class Field
 		// go over all y-indices
 		for (int j=0 ; j<m ; j++ )
 		{
-			// set the 0th and n-1st (first and last) field value zeros
+			// set the 0th and n-1st (first and last) field values
 			// to what they are one index into the domain
 			// -> apply zero-gradient (von Neumann) BC at left and right sides
 			a[0][j]   = a[1][j];
@@ -387,7 +395,7 @@ class Field
 			a[i][0]   = a[i][1];
 			a[i][m-1] = a[i][m-2];
 		
-			// if the x-direction is fixed-value then assign the values
+			// if the y-direction is fixed-value then assign the values
 			if(btype==2)
 			{
 				a[i][1]   = bval;  

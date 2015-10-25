@@ -1,8 +1,9 @@
 \documentclass[notitlepage]{article}
 
 \title{LilyPad base class reference}
-\author{Artur Lidtke}
+%\author{Artur Lidtke}
 
+\usepackage{amsmath}
 \usepackage{graphicx}
 \usepackage{morefloats}
 \usepackage{fixltx2e}
@@ -42,18 +43,7 @@ moredelim=**[is][\color{red}]{@}{@} % add @ delimiter and colour the stuff betwe
 
 %%%%%
 \begin{abstract}
-Somebody elses code is always hard, let's break it down!
-
-\textcolor{red}
-{
-\textbf{Questions}
-\begin{itemize}
-\item Why assign boundary values to i/j = 1 and n/m-1?
-\item What does the gradientExit really mean? why when it's set to true we
-	subtract the mean value from the field at the RHS extent before adding the
-	actual BC value?
-\end{itemize}
-}
+Somebody else’s code is always hard, let's break it down!
 \end{abstract}
 
 % =======================
@@ -305,7 +295,6 @@ float iy(int i){ return y.in((float)i);}
 \subsubsection{idx/idy}
 
 Inverse conversion, used for something to do with mouse coordinates.
-\textcolor{red}{no idea why this is of any use}
 
 \begin{lstlisting}[style=myCpp]
 float idx(int i){ return i/x.r;}
@@ -327,7 +316,6 @@ int py(float i){ return (int)(y.out(i));}
 
 Inverse transfrom in the pixel axis.
 
-\textcolor{red}{no idea why this is of any use}
 \begin{lstlisting}[style=myCpp]
 int pdx(float i){ return (int)(x.r*i);}
 int pdy(float i){ return (int)(y.r*i);}
@@ -349,9 +337,15 @@ taking gradients or Laplacians, interpolating, etc.
 \begin{itemize}
 \item \texttt{<float[][]> a} - array of internal field values, shape (n,m)
 \item \texttt{<int> n, m} - number of grid points in x- and y-directions
-\item \texttt{<int> btype} - type of boundary condition \textcolor{red}{what are the numbers?}
+\item \texttt{<int> btype} - type of boundary condition; possible values
+	\begin{itemize}
+	\item 0 - zero gradient (Dirichlet) BC in all directions
+	\item 1 - fixed value (Neumann) BC in the x-direction
+	\item 2 - Neumann BC in the y-direction
+	\end{itemize}
 \item \texttt{<float> bval} - value of the boundary condition (only used in certain cases of \texttt{btype} values)
-\item \texttt{<bool> gradientExit} - \textcolor{red}{how exactly does this work?}
+\item \texttt{<bool> gradientExit} - flag specifying whether gradient outlet BC is used;
+	important only if \texttt{btype} is 1 or 2
 \end{itemize}
 
 % -----------------------
@@ -379,7 +373,14 @@ Field( int n, int m, int btype, float bval )
 % +++++++++++++++++++++++
 \subsubsection{Laplacian}
 
-Compute second spatial derivative of the field using a 2nd order central scheme.
+Compute second spatial derivative of the field,
+%
+\begin{equation}
+\nabla^2 \phi = \frac{\partial^2\phi}{\partial x^2}
+	+ \frac{\partial^2\phi}{\partial y^2},
+\end{equation}
+%
+using a 2nd order central scheme.
 
 \begin{lstlisting}[style=myCpp]
 Field laplacian ()
@@ -410,8 +411,14 @@ Field laplacian ()
 % +++++++++++++++++++++++
 \subsubsection{Gradient}
 
-Compute the first spatial derivative of the field using a 1st order backward
-scheme.
+Compute the first spatial derivative of the field,
+%
+\begin{equation}
+\nabla \phi = \frac{\partial\phi}{\partial x} \hat{\mathbf{i}}
+	+ \frac{\partial\phi}{\partial y} \hat{\mathbf{j}},
+\end{equation}
+%
+using a 1st order backward scheme.
 
 \begin{lstlisting}[style=myCpp]
 VectorField gradient()
@@ -435,20 +442,27 @@ VectorField gradient()
 	// call the vectorField method to set the boundary values
 	// this calls the Field::setBC() function on both x- and
 	// y-components of the gradient function; x-dir is given
-	// btype 1 and y-dir btype 2
+	// btype 1 and y-dir btype 2 - this makes the lhs and bottom
+	// inlets for u and v, and rhs and top outlets for u and v, respectively
 	g.setBC(); // issues?
 	return g;
 }
 \end{lstlisting}
 
 % +++++++++++++++++++++++
-\subsubsection{Adect}
+\subsubsection{Advect}
 
 Given a velocity field at this time step, \texttt{(u,v)}, and at the previous time step,
 \texttt{(u0,v0)}, convect the scalar field in space. This uses the basic form of the scalar
-transport equation, i.e. total derivative equals zero, assuming there are no
+transport equation,
+%
+\begin{equation}
+\frac{\mathrm{D} \phi}{\mathrm{D}t} = 0,
+\end{equation}
+%
+i.e. total derivative equals zero, assuming there are no
 source terms on the RHS of the equation. To be more accurate, the function uses
-two consequtive time step values with a 2nd order Runge-Kutta method and a
+two consecutive time step values with a 2nd order Runge-Kutta method and a
 quadratic interpolation routine in space.
 
 \begin{lstlisting}[style=myCpp]
@@ -476,10 +490,14 @@ void advect(float step, Field u, Field v, Field u0, Field v0)
 	{
 		for( int j=1; j<m-1; j++)
 		{
-			// select the interpolation point to be the current cell
+			// select the interpolation point to be the +ve face of cell 0,
+			// iterating up to -ve face of the last cell - i.e. all internal faces
 			float x = i;
 			float y = j;
 			// correct for boundary values if necessary
+			// Note: linear and quadratic interpolation methods will modify x and y by +0.5
+			// if we are using Neumann BC (1 or 2) - we want to keep interpolation
+			// points to be face centres and so we need to fool the interpolation method
 			if(btype==1) x -= 0.5;
 			if(btype==2) y -= 0.5;
 			// get the velocities at this time step
@@ -510,6 +528,9 @@ void advect(float step, Field u, Field v, Field u0, Field v0)
 
 Given a point of interest, \texttt{(x0,y0)}, interpoalte the field values in space to
 get a value at that location.
+\textcolor{red}{Why do the quadratic and linear interpolation methods increment x and y
+by a half if the BC is specified to Neumann in the respective direction? Wherever they're
+actually used this seems to be compensated for by calling them with x-0.5 in the first place}
 
 \begin{lstlisting}[style=myCpp]
 float quadratic( float x0, float y0)
@@ -573,11 +594,14 @@ Basic linear interpolation of the field values at a point of interest.
 float linear(float x0, float y0)
 {
 	// take the point of interest and make it bound between
-	// 0.5 and x_max-1.5
+	// 0.5 and x_max-0.5 - i.e. cell centres of 0th and N-1st cell (boundary cells)
 	float x  = min(max(0.5,x0), n-0.5);
 	if(btype==1) x += 0.5;
 	
 	// index of the cell around which we interpolate
+	// make sure we do not pick N-1st cell (the last one)
+	// casting <float>x to <int> will round down to the nearest integer
+	// so that x should be between i and i+1
 	int i = min( (int)x, n-2 ); 
 	// weighting factor in the x-direction
 	float s = x-i;
@@ -611,9 +635,28 @@ This function takes care of all boundary condition related operations.
 First apply von Neumann (normal gradient equal to zero) in both
 x- and y-directions by setting the first and last grid point values to be equal to
 those in the second and second-last cells.
-\textcolor{red}{
-If the boundary type is set to 1 then
-}
+
+Boundary types:
+\begin{itemize}
+\item 0 - zero gradient (Dirichlet) applied everywhere (take 0th and N-1st cell in x and y
+	and give them a value equal to that one cell into the domain (1st and N-2nd)
+\item 1 - fixed value (Neumann) type BC in the x-direction
+	\begin{itemize}
+	\item If \texttt{gradientExit} is specified true then apply the \texttt{bvalue}
+		to the 1st (not 0th!) cell in the x-direction across all y-values;
+		then, a mean value at the outflow is computed using N-2 index (note how actually
+		index N-1 is used but that value has just been assigned N-2 value a few lines above).
+		Now we let all N-1 cells have the value of \texttt{bval} less the mean.
+		\textcolor{red}{why subtract the mean?}
+	\item Otherwise, let all cells at 1st and N-1st index in the x-direction equal
+		to \texttt{bval}. The value is assigned at N-1st index not to interfere with
+		zero gradient condition later \textcolor{red}{correct?}.
+		\textcolor{red}{why assign to N-1st and not N-2nd then?}
+	\end{itemize}
+\item 2 - this is analogous to \texttt{btype} 1 but in the y-direction; in this case
+	there is no \texttt{gradientExit} option and so \texttt{bval} is assigned to cells
+	both at the top and at the bottom of the domain (again, use 1st and N-1st)
+\end{itemize}
 
 \begin{lstlisting}[style=myCpp]
 // correct the boundary conditions
@@ -689,6 +732,14 @@ Compute gradient in a normal direction where
 \texttt{VectorField::x} holding the actual values of the gradient. See the function
 \texttt{BDIM::get\_wn} for more information on how these are calculated.
 
+The evaluated expression is
+%
+\begin{equation}
+g = \mathbf{w}_n \cdot \nabla \phi
+\end{equation}
+%
+where the gradient of the field is approximated using central scheme.
+
 \begin{lstlisting}[style=myCpp]
 Field normalGrad(VectorField wnx, VectorField wny)
 {
@@ -704,12 +755,236 @@ Field normalGrad(VectorField wnx, VectorField wny)
 			// approximate d(a)/dx_i using 2nd order central scheme
 			// [a(i+1,j)-a(i-1,j)]/(2 delta_x), where delta_x = 1.0
 			// take a dot-product with the wall-normal direction
-			g.a[i][j] = 0.5*( wnx.x.a[i][j] * (a[i+1][j]-a[i-1][j])
-				+ wny.x.a[i][j] * (a[i][j+1]-a[i][j-1]) );
+			g.a[i][j] = 0.5*( wnx.x.a[i][j] * (a[i+1][j  ]-a[i-1][j  ])
+							+ wny.x.a[i][j] * (a[i  ][j+1]-a[i  ][j-1]) );
 		}
 	}
 	return g;
 }
 \end{lstlisting}
+
+% =======================
+\section{Vector field}
+
+% -----------------------
+\subsection{Description}
+
+Class which makes use of the scalar field type to implement functionality
+relevant to a vector quantity in 2D space.
+It has some of its methods similar to those of a scalar field, such as assignment
+or algebraic operators, normal gradient computation, etc. which are omitted here
+fore brevity.
+
+% -----------------------
+\subsection{Internal fields}
+
+\begin{itemize}
+\item \texttt{<Field> x, y} - x- and y-components of the vector quantity, stored
+	as \texttt{Field} types
+\item \texttt{<int> n, m} - no. cells in x- and y-directions
+\item \texttt{<float> CF} - QUICK parameter, set to 1/6 \textcolor{red}{names?}
+\item \texttt{<float> S} - QUICK parameter, set to 10
+\end{itemize}
+
+% -----------------------
+\subsection{Methods}
+
+% +++++++++++++++++++++++
+\subsubsection{Divergence}
+
+What else, computes divergence of the field, in other words
+%
+\begin{equation}
+\nabla \cdot \mathbf{U} .
+\end{equation}
+%
+The derivative operator is approximated using first order forward difference.
+
+\begin{lstlisting}[style=myCpp]
+Field divergence ()
+{
+	// create the returned field
+	Field d = new Field( n, m );
+	for ( int i=1 ; i<n-1 ; i++ )
+	{
+		for ( int j=1 ; j<m-1 ; j++ )
+		{
+			d.a[i][j] = x.a[i+1][j  ]-x.a[i][j]+
+						y.a[i  ][j+1]-y.a[i][j];
+		}
+	}
+	return d;
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Turbulent KE}
+
+Computes a field which would return the turbulent kinetic energy if the stored
+field was actually a velocity field. Typically, this evaluates to
+%
+\begin{equation}
+TKE = \frac{1}{2} \left( \overline{u'^2} + \overline{v'^2} \right),
+\end{equation}
+%
+where the overline denotes an ensemble average.
+\textcolor{red}{why add phi\_i and phi\_(i+1)? and what about the -2?}
+
+\begin{lstlisting}[style=myCpp]
+Field ke ()
+{
+	Field d = new Field( n, m );
+	for ( int i=1 ; i<n-1 ; i++ )
+	{
+		for ( int j=1 ; j<m-1 ; j++ )
+		{
+			d.a[i][j] = ( sq(x.a[i+1][j  ]+x.a[i][j]-2.0)
+				 		+ sq(y.a[i  ][j+1]+y.a[i][j]    ) )*0.25;
+		}
+	}
+	return d;
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Vorticity}
+
+Computes a field which would return the vorticity if the stored
+field was actually a velocity field. In other words, the result is
+%
+\begin{equation}
+\nabla \times \mathbf{U},
+\end{equation}
+%
+Gradients are computed using central scheme.
+\textcolor{red}{both gradients are computed at (i,j) and (i+1,j+1) and
+then averaged, why?}
+
+\begin{lstlisting}[style=myCpp]
+Field vorticity ()
+{
+	Field d = new Field( n, m );
+	for ( int i=1 ; i<n-1 ; i++ )
+	{
+		for ( int j=1 ; j<m-1 ; j++ )
+		{
+			// take the gradients and then compute the magnitude
+			// gradients approximated using central difference
+			d.a[i][j] = 0.25*(	x.a[i  ][j-1]-x.a[i  ][j+1]+ // -du/dy
+								x.a[i+1][j-1]-x.a[i+1][j+1]+ // -du/dy at i+1
+								y.a[i+1][j  ]-y.a[i-1][j  ]+ // dv/dx
+								y.a[i+1][j+1]-y.a[i-1][j+1]); // dv/dx at j+1
+		}
+	}
+	return d;
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Q criterion}
+
+Computes a field which would return the Q criterion if the stored
+field was actually a velocity field.
+To define it, let us first denote the rate-of-strain tensor,
+%
+\begin{equation}
+\mathbf{S} = \frac{1}{2}\left[\nabla\mathbf{U}+\left(\nabla\mathbf{U}\right)^T\right]
+	= \frac{1}{2} \begin{bmatrix}
+		\frac{\partial u}{\partial x} & \frac{\partial v}{\partial x} \\
+		\frac{\partial u}{\partial y} & \frac{\partial v}{\partial y}
+		\end{bmatrix}
+	+ \frac{1}{2} \begin{bmatrix}
+		\frac{\partial u}{\partial x} & \frac{\partial u}{\partial y} \\
+		\frac{\partial v}{\partial x} & \frac{\partial v}{\partial y}
+		\end{bmatrix}
+	= \frac{1}{2} \begin{bmatrix}
+		2\frac{\partial u}{\partial x} & \frac{\partial u}{\partial y} + \frac{\partial v}{\partial x} \\
+		\frac{\partial v}{\partial x} + \frac{\partial u}{\partial y} & 2\frac{\partial v}{\partial y}
+		\end{bmatrix} ,
+\end{equation}
+%
+and vorticity tensor,
+%
+\begin{equation}
+\mathbf{\Omega} = \frac{1}{2}\left[\nabla\mathbf{U}-\left(\nabla\mathbf{U}\right)^T\right]
+	= \frac{1}{2} \begin{bmatrix}
+		0 & \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y} \\
+		\frac{\partial u}{\partial y} - \frac{\partial v}{\partial x} & 0
+		\end{bmatrix} .
+\end{equation}
+%
+Now, the vortex identification criterion may be written as
+%
+\begin{equation}
+Q = \frac{1}{2} \left(\left|\mathbf{\Omega}\right|^2
+	- \left|\mathbf{S}\right|^2 \right) > 0.
+\end{equation}
+\textcolor{red}{should this not be du\_i/dx\_j du\_j/dx\_i but without
+excluding the option with i=j? also, would there be a minus between the
+two terms?}
+\url{http://www.wseas.us/e-library/conferences/2011/Mexico/MAFLUH/MAFLUH-03.pdf}
+
+\begin{lstlisting}[style=myCpp]
+Field Qcrit ()
+{
+	Field q = new Field( n, m );
+	for ( int i=1 ; i<n-1 ; i++ )
+	{
+		for ( int j=1 ; j<m-1 ; j++ )
+		{
+			float dudx = 0.5*(x.a[i+1][j  ]-x.a[i-1][j  ]);
+			float dudy = 0.5*(x.a[i  ][j+1]-x.a[i  ][j-1]);
+			float dvdx = 0.5*(y.a[i+1][j  ]-y.a[i-1][j  ]);
+			float dvdy = 0.5*(y.a[i  ][j+1]-y.a[i  ][j-1]);
+			q.a[i][j] = dudx*dvdy-dvdx*dudy;
+		}
+	}
+	return q;
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Advection - diffusion}
+
+a
+
+\begin{lstlisting}[style=myCpp]
+void AdvDif(VectorField u0, float dt, float nu)
+{
+	VectorField v = new VectorField(this);
+	for ( int j=1; j<m-1; j++)
+	{
+		for ( int i=1; i<n-1; i++)
+		{
+			v.x.a[i][j] = (advection(x, i, j) + nu*diffusion(x, i, j))*dt+u0.x.a[i][j];
+			v.y.a[i][j] = (advection(y, i, j) + nu*diffusion(y, i, j))*dt+u0.y.a[i][j];
+		}
+	}
+	this.eq(v);   
+}
+\end{lstlisting}
+
+% =======================
+\section{a}
+
+% -----------------------
+\subsection{Description}
+
+a
+
+% -----------------------
+\subsection{Internal fields}
+
+\begin{itemize}
+\item \texttt{<float> b} - a
+\end{itemize}
+
+% -----------------------
+\subsection{Methods}
+
+% +++++++++++++++++++++++
+\subsubsection{a}
+
+a
 
 \end{document}
