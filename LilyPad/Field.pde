@@ -170,7 +170,7 @@ class Field
 				// correct for boundary values if necessary
 				// Note: linear and quadratic interpolation methods will modify x and y by +0.5
 				// if we are using Neumann BC (1 or 2) - we want to keep interpolation
-				// points to be face centres and so we need to fool the interpolation method
+				// points to be cell centres and so we need to fool the interpolation method
 				if(btype==1) x -= 0.5;
 				if(btype==2) y -= 0.5;
 				// get the velocities at this time step

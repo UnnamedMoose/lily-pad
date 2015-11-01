@@ -223,23 +223,73 @@ class VectorField
 		popMatrix();
 	} 
 
-	void AdvDif(VectorField u0, float dt, float nu)
+	// QUICK scheme implementation
+	float bho(Field b, int i, int j, int d1, int d2, float uf)
 	{
-		VectorField v = new VectorField(this);
-		for ( int j=1; j<m-1; j++)
+		// b - the field to be interpolated
+		// i,j - cell indices
+		// d1,d2 - tell us on which face from i,j the values are being computed
+		// uf - convection velocity on the face of interest
+		
+		// this part remains the same irrespectively of where the flow is coming from
+		// note that it represents simple linear interpolation between cell i,j and i+d1,j+d2
+		float bf =  0.5*(b.a[i+d1][j+d2]+b.a[i][j]);
+		
+		// check if the flow is in the negative direction - if yes then we need to
+		// shift the stencil by one node UPWIND
+		if (d1*uf<0)
 		{
-			for ( int i=1; i<n-1; i++)
-			{
-				v.x.a[i][j] = (advection(x, i, j) + nu*diffusion(x, i, j))*dt+u0.x.a[i][j];
-				v.y.a[i][j] = (advection(y, i, j) + nu*diffusion(y, i, j))*dt+u0.y.a[i][j];
-			}
+			i += d1; 
+			d1 = -d1;
 		}
-		this.eq(v);   
+		
+		if (d2*uf<0)
+		{
+			j += d2;
+			d2 = -d2;
+		}
+		
+		// if the stencil exceeds the grid dimensions then simply switch to a linear scheme
+		if ( i>n-2 || i<2 || j>m-2 || j<2 ) return bf;
+		
+		// get the three values between which we want to fit a parabola
+		float bc = b.a[i][j]; // cell value
+		float bd = b.a[i+d1][j+d2]; // downwind value
+		float bu = b.a[i-d1][j-d2]; // upwind value
+		
+		// bf is the typical QUICK implementation now, except the CF coefficient may be varied
+		bf -= CF*(bd-2*bc+bu);
+		
+		// this is a test which approximates the face value by taking the upwind value,
+		// and then going 10 d(phi)/dx from it
+		float b1 = bu+S*(bc-bu);
+		
+		// this bounds the solution in some way between the cell value and a pre-set limit
+		// with respect to the upwind cell
+		return med(bf, bc,
+			med(bc, bd, b1) // determine the upper bound for the limiter TODO will the upper and lower limits not be the same too often?
+			);
 	}
 
+	float med(float a, float b, float c)
+	{
+		// if b and c are bound limits then the passed value a is guaranteed to
+		// fall between b and c
+		
+		return(max(min(a, b),min(max(a, b),c)));
+	}
+	
+	float diffusion (Field b, int i, int j)
+	{
+		// use second order linear scheme to compute the 2nd spatial derivative around cell i,j
+		return b.a[i+1][j] + b.a[i][j+1] - 4*b.a[i][j] + b.a[i-1][j] + b.a[i][j-1];
+	}
+	
 	float advection (Field b, int i, int j)
 	{
+		// face velocity values - w,e,s,n
 		float uo, ue, vs, vn;
+		
 		// get values on the faces
 		// if inlet is in the x-direction
 		if (b.btype == 1)
@@ -256,49 +306,29 @@ class VectorField
 			vs = 0.5*(y.a[i  ][j-1]+y.a[i  ][j  ]);
 			vn = 0.5*(y.a[i  ][j  ]+y.a[i  ][j+1]);
 		}
+		// return the sum of fluxes of b INTO this cell - interpolate using QUICK scheme
 		return ( (uo*bho(b, i, j, -1, 0, uo) - ue*bho(b, i, j, 1, 0, ue))
 			   + (vs*bho(b, i, j, 0, -1, vs) - vn*bho(b, i, j, 0, 1, vn)) );
 	}
-
-	float diffusion (Field b, int i, int j)
+	
+	void AdvDif(VectorField u0, float dt, float nu)
 	{
-		return b.a[i+1][j] + b.a[i][j+1] - 4*b.a[i][j] + b.a[i-1][j] + b.a[i][j-1];
-	}
-
-	float bho(Field b, int i, int j, int d1, int d2, float uf)
-	{
-		float bf =  0.5*(b.a[i+d1][j+d2]+b.a[i][j]);
-		if (d1*uf<0)
+		VectorField v = new VectorField(this);
+		for ( int j=1; j<m-1; j++)
 		{
-			i += d1; 
-			d1 = -d1;
+			for ( int i=1; i<n-1; i++)
+			{
+				// compute advection-diffusion problem using Euler time method given the old velocity field u0
+				v.x.a[i][j] = (advection(x, i, j) + nu*diffusion(x, i, j))*dt+u0.x.a[i][j];
+				v.y.a[i][j] = (advection(y, i, j) + nu*diffusion(y, i, j))*dt+u0.y.a[i][j];
+			}
 		}
-		
-		if (d2*uf<0)
-		{
-			j += d2;
-			d2 = -d2;
-		}
-		 
-		if ( i>n-2 || i<2 || j>m-2 || j<2 ) return bf;
-		
-		float bc = b.a[i][j];
-		float bd = b.a[i+d1][j+d2];
-		float bu = b.a[i-d1][j-d2];
-		
-		bf -= CF*(bd-2*bc+bu);
-		float b1 = bu+S*(bc-bu);
-		
-		return med(bf, bc, med(bc, bd, b1));
-	}
-
-	float med(float a, float b, float c)
-	{
-		return(max(min(a, b), min(max(a, b), c)));
+		this.eq(v);   
 	}
 
 	float CFL(float nu)
 	{
+		// find the maximum velocity and store it in b
 		float b = abs(x.a[0][0])+abs(y.a[0][0]);
 		float c;
 		for ( int i=1; i<n-1; i++)
