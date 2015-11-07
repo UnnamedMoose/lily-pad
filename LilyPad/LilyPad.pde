@@ -8,24 +8,9 @@ Change the geometry, flow conditions, numercial parameters
 
 *********************************************************/
 
-Field p,u,v;
-
-void setup(){
-  size(400,400);
-  background(1,0,0);
-  p = new Field(100,150);
-  p.eq(1.0,40,50,40,75);
-  u = new Field(100,150,1,0.25);
-  v = new Field(100,150,2,0.2);
-}
-void draw(){
-  p.advect( 1., u, v );
-  p.display(0,1);
-}
-
 // ====================================
 // DEFAULT CODE
-/*BDIM flow;
+BDIM flow;
 CircleBody body;
 FloodPlot flood;
 
@@ -49,5 +34,5 @@ void draw(){
   body.display();
 }
 void mousePressed(){body.mousePressed();}
-void mouseReleased(){body.mouseReleased();}*/
+void mouseReleased(){body.mouseReleased();}
 /*======================================*/
