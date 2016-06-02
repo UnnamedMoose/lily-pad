@@ -19,6 +19,7 @@ void draw(){
   p.advect( 1., u, v );
   p.display(0,1);
 }
+
 ***********************************/
 
 class Field
