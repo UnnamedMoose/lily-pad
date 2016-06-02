@@ -45,6 +45,19 @@ moredelim=**[is][\color{red}]{@}{@} % add @ delimiter and colour the stuff betwe
 %%%%%
 \begin{abstract}
 Somebody else’s code is always hard, let's break it down!
+
+Most of the stuff in red has the same root issue. The variables are not collocated. Field.btype defines
+where the variable is located. 0 is cell center, 1 is on the negative x face of the cell, 2 is on the
+negative y face. This is why the interpolation changes depending on btype, and why the values of vorticity
+and ke are averaged (because I'm taking the average of the face values to get the cell centered value),
+and why it looks like I'm using first order difference in the gradient (actually second order central).
+
+The CFL is my own condition. I haven't seen anyone else use it, though I'm not sure why. This is the
+fundamental condition which determines stability of a connection diffusion problem. Maybe I should write it up in a tech note.
+
+The quick scheme is called twice in bdim (predictor/corrector) which makes it second order overall.
+I would guess bho is "b high-order", but I didn't write any of that code, so I'm not sure.
+
 \end{abstract}
 
 % =======================
@@ -338,15 +351,15 @@ taking gradients or Laplacians, interpolating, etc.
 \begin{itemize}
 \item \texttt{<float[][]> a} - array of internal field values, shape (n,m)
 \item \texttt{<int> n, m} - number of grid points in x- and y-directions
-\item \texttt{<int> btype} - type of boundary condition; possible values
+\item \texttt{<int> btype} - defines where the variable is defined in the segregated storage scheme
 	\begin{itemize}
-	\item 0 - zero gradient (Dirichlet) BC in all directions
-	\item 1 - fixed value (Neumann) BC in the x-direction
-	\item 2 - Neumann BC in the y-direction
+		\item 0 - cell centre (e.g. pressure)
+		\item 1 - negative x-face (e.g. x-velocity)
+		\item 2 - negative y-face (e.g. y-velocity)
 	\end{itemize}
-\item \texttt{<float> bval} - value of the boundary condition (only used in certain cases of \texttt{btype} values)
+\item \texttt{<float> bval} - value of the boundary condition (only used in certain cases)
 \item \texttt{<bool> gradientExit} - flag specifying whether gradient outlet BC is used;
-	important only if \texttt{btype} is 1 or 2
+	important only if \texttt{btype} is 1 or 2, namely a vector field component is being considered
 \end{itemize}
 
 % -----------------------
@@ -440,11 +453,11 @@ VectorField gradient()
 		}
 	}
 	
-	// call the vectorField method to set the boundary values
+	// call the vectorField method to set the boundary values to zero in both directions (gradientExit=false)
 	// this calls the Field::setBC() function on both x- and
 	// y-components of the gradient function; x-dir is given
-	// btype 1 and y-dir btype 2 - this makes the lhs and bottom
-	// inlets for u and v, and rhs and top outlets for u and v, respectively
+	// btype 1 and y-dir btype 2 - this causes the field values to be stored at the faces
+	// as per staggered mesh formulation for a vector field
 	g.setBC(); // issues?
 	return g;
 }
@@ -497,8 +510,11 @@ void advect(float step, Field u, Field v, Field u0, Field v0)
 			float y = j;
 			// correct for boundary values if necessary
 			// Note: linear and quadratic interpolation methods will modify x and y by +0.5
-			// if we are using Neumann BC (1 or 2) - we want to keep interpolation
-			// points to be cell centres and so we need to fool the interpolation method
+			// if the field is stored at the -ve face centres because we want to convert the x-
+			// and y-location into indices in the matrix. The interpolation method is generic and
+			// so also makes sure the point at which interpolation is performed is valid, bounded inside
+			// the domain and so on. If btype>0 the variable is stored at face centre, and hence 0.5\delta
+			// before/below the (x,y) of the (i,j) cell
 			if(btype==1) x -= 0.5;
 			if(btype==2) y -= 0.5;
 			// get the velocities at this time step
@@ -528,7 +544,8 @@ void advect(float step, Field u, Field v, Field u0, Field v0)
 \subsubsection{Quadratic}
 
 Given a point of interest, \texttt{(x0,y0)}, interpoalte the field values in space to
-get a value at that location.
+get a value at that location. The code uses
+
 \textcolor{red}{Why do the quadratic and linear interpolation methods increment x and y
 by a half if the BC is specified to Neumann in the respective direction? Wherever they're
 actually used this seems to be compensated for by calling them with x-0.5 in the first place}
@@ -536,7 +553,7 @@ actually used this seems to be compensated for by calling them with x-0.5 in the
 \begin{lstlisting}[style=myCpp]
 float quadratic( float x0, float y0)
 {
-	// correct (x0,y0) to allow for BCs
+	// correct (x0,y0) if the field is stored at face centres
 	float x = x0, y = y0;
 	if(btype==1) x += 0.5;
 	if(btype==2) y += 0.5;
@@ -635,45 +652,30 @@ float linear(float x0, float y0)
 This function takes care of all boundary condition related operations.
 First apply von Neumann (normal gradient equal to zero) in both
 x- and y-directions by setting the first and last grid point values to be equal to
-those in the second and second-last cells.
+those in the second and second-last cells. If the variable is stored at cell centres this is the only
+step required. In the case of staggered variables, such as velocity x- and y-components, values
+at the inlet and outlet faces are also prescribed. In a standard application with flow from left to right,
+these would imply zero velocities in the y-direction at the walls, a fixed value BC at the left-hand side,
+and an outlet BC at the RHS (\texttt{gradientExit} set to \texttt{true}).
+\textcolor{red}{outlet BC is not your every-day zeroGradient, so what is it?}
 
-Boundary types:
-\begin{itemize}
-\item 0 - zero gradient (Dirichlet) applied everywhere (take 0th and N-1st cell in x and y
-	and give them a value equal to that one cell into the domain (1st and N-2nd)
-\item 1 - fixed value (Neumann) type BC in the x-direction
-	\begin{itemize}
-	\item If \texttt{gradientExit} is specified true then apply the \texttt{bvalue}
-		to the 1st (not 0th!) cell in the x-direction across all y-values;
-		then, a mean value at the outflow is computed using N-2 index (note how actually
-		index N-1 is used but that value has just been assigned N-2 value a few lines above).
-		Now we let all N-1 cells have the value of \texttt{bval} less the mean.
-		\textcolor{red}{why subtract the mean?}
-	\item Otherwise, let all cells at 1st and N-1st index in the x-direction equal
-		to \texttt{bval}. The value is assigned at N-1st index not to interfere with
-		zero gradient condition later \textcolor{red}{correct?}.
-		\textcolor{red}{why assign to N-1st and not N-2nd then?}
-	\end{itemize}
-\item 2 - this is analogous to \texttt{btype} 1 but in the y-direction; in this case
-	there is no \texttt{gradientExit} option and so \texttt{bval} is assigned to cells
-	both at the top and at the bottom of the domain (again, use 1st and N-1st)
 \end{itemize}
 
 \begin{lstlisting}[style=myCpp]
-// correct the boundary conditions
 void setBC ()
 {
 	float s=0;
-	
+
 	// go over all y-indices
 	for (int j=0 ; j<m ; j++ )
 	{
-		// set the 0th and n-1st (first and last) field value zeros
+		// set the 0th and n-1st (first and last) field values
 		// to what they are one index into the domain
 		// -> apply zero-gradient (von Neumann) BC at left and right sides
 		a[0][j]   = a[1][j];
 		a[n-1][j] = a[n-2][j];
-		
+	
+		// if the field values are stored at the faces
 		if(btype==1)
 		{
 			// if we have a zero-gradient type right-hand-side boundary
@@ -688,8 +690,8 @@ void setBC ()
 			}
 			// set the field values to the constant held in the class
 			// if we have a fixed-value type BC set
-			// do this to cells 1-into the domain (not 0 and n-1)
-			// TODO why?
+			// do this to cells 1st cell into the domain at the LHS and last one at the RHS
+			// this ensures zero-gradient at the LHS is maintained later on at the LHS
 			else
 			{
 				a[1][j]   = bval;  
@@ -697,22 +699,22 @@ void setBC ()
 			}
 		}
 	}
-	
+
 	// go over all x-indices
 	for (int i=0 ; i<n ; i++ )
 	{
 		// apply zero-gradient in the y-direction at top and bottom
 		a[i][0]   = a[i][1];
 		a[i][m-1] = a[i][m-2];
-		
-		// if the x-direction is fixed-value then assign the values
+	
+		// if the field values are stored at face centres set boundary values
 		if(btype==2)
 		{
 			a[i][1]   = bval;  
 			a[i][m-1] = bval;
 		}
 	}
-	
+
 	// set the RHS BC
 	if(gradientExit)
 	{

@@ -19,6 +19,7 @@ void draw(){
   p.advect( 1., u, v );
   p.display(0,1);
 }
+
 ***********************************/
 
 class Field
@@ -26,10 +27,14 @@ class Field
 	// internal values of the field
 	float[][] a;  
 	
-	int n,m, // number of grid points in each direction
-		btype = 0; // BC type; 0- , 1- , 2- TODO
+	int n,m, // number of grid points in each direction (x and y, respectively)
+		btype = 0; // defines where the variable is defined in the segregated storage scheme
+			// 0 - cell centre (e.g. pressure)
+			// 1 - negative x-face (e.g. x-velocity)
+			// 2 - negative y-face (e.g. y-velocity)
+
 	float bval = 0; // BC value for Dirichlet BC
-	boolean gradientExit = false; // TODO ?
+	boolean gradientExit = false; // whether to apply special outlet treatment at the RHS boundary
 
 	// construct from components
 	Field( int n, int m, int btype, float bval )
@@ -122,11 +127,11 @@ class Field
 			}
 		}
 		
-		// call the vectorField method to set the boundary values
+		// call the vectorField method to set the boundary values to zero in both directions (gradientExit=false)
 		// this calls the Field::setBC() function on both x- and
 		// y-components of the gradient function; x-dir is given
-		// btype 1 and y-dir btype 2 - this makes the lhs and bottom
-		// inlets for u and v, and rhs and top outlets for u and v, respectively
+		// btype 1 and y-dir btype 2 - this causes the field values to be stored at the faces
+		// as per staggered mesh formulation for a vector field
 		g.setBC(); // issues?
 		return g;
 	}
@@ -169,8 +174,11 @@ class Field
 				float y = j;
 				// correct for boundary values if necessary
 				// Note: linear and quadratic interpolation methods will modify x and y by +0.5
-				// if we are using Neumann BC (1 or 2) - we want to keep interpolation
-				// points to be face centres and so we need to fool the interpolation method
+				// if the field is stored at the -ve face centres because we want to convert the x-
+				// and y-location into indices in the matrix. The interpolation method is generic and
+				// so also makes sure the point at which interpolation is performed is valid, bounded inside
+				// the domain and so on. If btype>0 the variable is stored at face centre, and hence 0.5\delta
+				// before/below the (x,y) of the (i,j) cell
 				if(btype==1) x -= 0.5;
 				if(btype==2) y -= 0.5;
 				// get the velocities at this time step
@@ -226,7 +234,7 @@ class Field
 				// select interpolation point to be this cell
 				float x = i;
 				float y = j;
-				// correct for BCs if necessary
+				// correct if the field is stored at face centres
 				if(btype==1) x -= 0.5;
 				if(btype==2) y -= 0.5;
 				// get the velocities at this point, multiply by -dt
@@ -245,7 +253,7 @@ class Field
 	// perform quadratic interpolation at (x0,y0)
 	float quadratic( float x0, float y0)
 	{
-		// correct (x0,y0) to allow for BCs
+		// correct (x0,y0) if the field is stored at face centres
 		float x = x0, y = y0;
 		if(btype==1) x += 0.5;
 		if(btype==2) y += 0.5;
@@ -290,9 +298,10 @@ class Field
 	// Interpolate the field at point (x0,y0)
 	float linear(float x0, float y0)
 	{
-		// take the point of interest and make it bound between
+		// take the point of interest and make it bounded between
 		// 0.5 and x_max-0.5 - i.e. cell centres of 0th and N-1st cell (boundary cells)
 		float x  = min(max(0.5,x0), n-1.5);
+		// correct if the field is stored at face centres
 		if(btype==1) x += 0.5;
 	
 		// index of the cell around which we interpolate
@@ -304,6 +313,7 @@ class Field
 		float s = x-i;
 	
 		float y  = min(max(0.5,y0), m-1.5);
+		// correct if the field is stored at face centres
 		if(btype==2) y += 0.5;
 	
 		int j = min( (int)y, m-2 );
@@ -364,6 +374,7 @@ class Field
 			a[0][j]   = a[1][j];
 			a[n-1][j] = a[n-2][j];
 		
+			// if the field values are stored at the faces
 			if(btype==1)
 			{
 				// if we have a zero-gradient type right-hand-side boundary
@@ -378,8 +389,8 @@ class Field
 				}
 				// set the field values to the constant held in the class
 				// if we have a fixed-value type BC set
-				// do this to cells 1-into the domain (not 0 and n-1)
-				// TODO why?
+				// do this to cells 1st cell into the domain at the LHS and last one at the RHS
+				// this ensures zero-gradient at the LHS is maintained later on at the LHS
 				else
 				{
 					a[1][j]   = bval;  
@@ -395,7 +406,7 @@ class Field
 			a[i][0]   = a[i][1];
 			a[i][m-1] = a[i][m-2];
 		
-			// if the y-direction is fixed-value then assign the values
+			// if the field values are stored at face centres set boundary values
 			if(btype==2)
 			{
 				a[i][1]   = bval;  
@@ -403,7 +414,7 @@ class Field
 			}
 		}
 	
-		// set the RHS BC
+		// set the RHS BC // TODO this needs more clarity
 		if(gradientExit)
 		{
 			// get the average values of s
@@ -458,7 +469,7 @@ class Field
 	// multiply this field by a given field item-wise
 	Field times( Field b )
 	{
-		// if the BC types do not match throw an error
+		// if the field storage types do not match throw an error
 		mismatch(this.btype,b.btype); 
 		Field c = new Field(this);
 		for( int i=0; i<n; i++)
@@ -631,7 +642,7 @@ class Field
 	{
 		if(i!=j)
 		{
-			println("You can't add or multiple fields of different types.");
+			println("You can't add or multiply fields of different types.");
 			exit();
 		}     
 	}
