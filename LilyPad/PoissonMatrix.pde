@@ -30,40 +30,51 @@ void setup(){
   Ax.display(-2,2);
 }
 ***********************************/
-public class PoissonMatrix {
-  int n, m;
-  VectorField lower;
-  Field diagonal,inv;
+public class PoissonMatrix 
+{
+	int n, m; // size of the matrix
+	VectorField lower; // lower diagonal coefficients
+	Field diagonal,inv;
 
-  PoissonMatrix( VectorField lower ){
-    this.n = lower.n;
-    this.m = lower.m;
-    this.lower = new VectorField(lower);
-    diagonal = new Field(n,m);
-    inv = new Field(n,m,0,1);
-    for ( int i=1 ; i<n-1 ; i++ ) {
-    for ( int j=1 ; j<m-1 ; j++ ) {
-      float sumd = lower.x.a[i][j]+lower.x.a[i+1][j]
-                  +lower.y.a[i][j]+lower.y.a[i][j+1];
-      diagonal.a[i][j] = -sumd;
-      if(sumd>1e-5) inv.a[i][j] = -1./sumd;
-    }}
-  }
+	// construct given the coefficients matrix
+	PoissonMatrix( VectorField lower )
+	{
+		this.n = lower.n;
+		this.m = lower.m;
+		this.lower = new VectorField(lower);
+		diagonal = new Field(n,m);
+		inv = new Field(n,m,0,1);
+		
+		for ( int i=1 ; i<n-1 ; i++ )
+		{
+			for ( int j=1 ; j<m-1 ; j++ )
+			{
+				float sumd = lower.x.a[i][j] + lower.x.a[i+1][j] + lower.y.a[i][j] + lower.y.a[i][j+1];
+				diagonal.a[i][j] = -sumd;
+				if(sumd>1e-5) inv.a[i][j] = -1./sumd;
+			}
+		}
+	}
 
-  Field times( Field x ){
-    Field ab = new Field(n,m);
-    for ( int i=1 ; i<n-1 ; i++ ) {
-    for ( int j=1 ; j<m-1 ; j++ ) {
-      ab.a[i][j] = x.a[i][j]*diagonal.a[i][j]
-                  +x.a[i-1][j]*lower.x.a[i][j]
-                  +x.a[i+1][j]*lower.x.a[i+1][j]
-                  +x.a[i][j-1]*lower.y.a[i][j]
-                  +x.a[i][j+1]*lower.y.a[i][j+1];
-    }} 
-    return ab;
-  }
+	Field times( Field x )
+	{
+		Field ab = new Field(n,m);
+		for ( int i=1 ; i<n-1 ; i++ )
+		{
+			for ( int j=1 ; j<m-1 ; j++ )
+			{
+				ab.a[i][j] = x.a[i  ][j  ]*diagonal.a[i][j]
+							+x.a[i-1][j  ]*lower.x.a[i  ][j  ]
+							+x.a[i+1][j  ]*lower.x.a[i+1][j  ]
+							+x.a[i  ][j-1]*lower.y.a[i  ][j  ]
+							+x.a[i  ][j+1]*lower.y.a[i  ][j+1];
+			}
+		}
+		return ab;
+	}
 
-  Field residual( Field b, Field x ){
-    return b.plus(this.times(x).times(-1));
-  }
+	// clalculate residual TODO check MG.pde to see how exactly this works
+	Field residual( Field b, Field x ) {
+		return b.plus(this.times(x).times(-1)); }
+
 }

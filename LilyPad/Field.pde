@@ -121,7 +121,8 @@ class Field
 			for ( int j=1 ; j<m-1 ; j++ )
 			{
 				// compute the x and y derivatives using a
-				// 1st order backward scheme
+				// 2nd order backward scheme (recall that gradients are stored at face centres so
+				// g.x(x-delta_x/2,y) = (phi(x,y)-phi(x-delta_x,y)) / delta_x
 				g.x.a[i][j] = a[i][j]-a[i-1][j];
 				g.y.a[i][j] = a[i][j]-a[i][j-1];
 			}

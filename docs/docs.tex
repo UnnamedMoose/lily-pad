@@ -7,7 +7,8 @@
 \usepackage{graphicx}
 \usepackage{morefloats}
 \usepackage{fixltx2e}
-\usepackage[hidelinks]{hyperref}
+%\usepackage[hidelinks]{hyperref}
+\usepackage{hyperref}
 \usepackage{breakurl}
 \usepackage{comment}
 \graphicspath{{Figures/}}
@@ -432,7 +433,7 @@ Compute the first spatial derivative of the field,
 	+ \frac{\partial\phi}{\partial y} \hat{\mathbf{j}},
 \end{equation}
 %
-using a 1st order backward scheme.
+using a 2nd order central scheme.
 
 \begin{lstlisting}[style=myCpp]
 VectorField gradient()
@@ -446,7 +447,8 @@ VectorField gradient()
 		for ( int j=1 ; j<m-1 ; j++ )
 		{
 			// compute the x and y derivatives using a
-			// 1st order backward scheme
+			// 2nd order backward scheme (recall that gradients are stored at face centres so
+			// g.x(x-delta_x/2,y) = (phi(x,y)-phi(x-delta_x,y)) / delta_x
 			// phi'(x) = [phi(x) - phi(x-delta_x)] / delta_x
 			g.x.a[i][j] = a[i][j]-a[i-1][j];
 			g.y.a[i][j] = a[i][j]-a[i][j-1];
@@ -543,12 +545,8 @@ void advect(float step, Field u, Field v, Field u0, Field v0)
 % +++++++++++++++++++++++
 \subsubsection{Quadratic}
 
-Given a point of interest, \texttt{(x0,y0)}, interpoalte the field values in space to
+Given a point of interest, \texttt{(x0,y0)}, interpolate the field values in space to
 get a value at that location. The code uses
-
-\textcolor{red}{Why do the quadratic and linear interpolation methods increment x and y
-by a half if the BC is specified to Neumann in the respective direction? Wherever they're
-actually used this seems to be compensated for by calling them with x-0.5 in the first place}
 
 \begin{lstlisting}[style=myCpp]
 float quadratic( float x0, float y0)
@@ -658,8 +656,6 @@ at the inlet and outlet faces are also prescribed. In a standard application wit
 these would imply zero velocities in the y-direction at the walls, a fixed value BC at the left-hand side,
 and an outlet BC at the RHS (\texttt{gradientExit} set to \texttt{true}).
 \textcolor{red}{outlet BC is not your every-day zeroGradient, so what is it?}
-
-\end{itemize}
 
 \begin{lstlisting}[style=myCpp]
 void setBC ()
@@ -798,10 +794,10 @@ fore brevity.
 What else, computes divergence of the field, in other words
 %
 \begin{equation}
-\nabla \cdot \mathbf{U} .
+\nabla \cdot \mathbf{U} = \frac{\partial u}{\partial x} + \frac{\partial v}{\partial y} .
 \end{equation}
 %
-The derivative operator is approximated using first order forward difference.
+The derivative operator is approximated using 2nd order central difference.
 
 \begin{lstlisting}[style=myCpp]
 Field divergence ()
@@ -812,6 +808,9 @@ Field divergence ()
 	{
 		for ( int j=1 ; j<m-1 ; j++ )
 		{
+			// use 2nd order central difference to get the derivative
+			// recall the vector field value (i) is at the negative face of cell (i)
+			// therefore central difference at cell centre is (phi(i+1,j)-phi(i,j)) / delta_x
 			d.a[i][j] = x.a[i+1][j  ]-x.a[i][j]+
 						y.a[i  ][j+1]-y.a[i][j];
 		}
@@ -827,11 +826,10 @@ Computes a field which would return the turbulent kinetic energy if the stored
 field was actually a velocity field. Typically, this evaluates to
 %
 \begin{equation}
-TKE = \frac{1}{2} \left( \overline{u'^2} + \overline{v'^2} \right),
+TKE = \frac{1}{4} \left( u'^2 + v'^2 \right),
 \end{equation}
 %
-where the overline denotes an ensemble average.
-\textcolor{red}{why add phi\_i and phi\_(i+1)? and what about the -2?}
+where prime variables denote quantities fluctuating about the ensemble average at a given point.
 
 \begin{lstlisting}[style=myCpp]
 Field ke ()
@@ -841,6 +839,11 @@ Field ke ()
 	{
 		for ( int j=1 ; j<m-1 ; j++ )
 		{
+			// first, take the average velocity in x- and y-directions; note that in the stream-wise
+			// direction need to subtract the mean to get the fluctuating component; this has unit value
+			// at faces i and i+1, therefore we subtract 2 from their sum
+			// then square each fluctuating component and add; division by 2 taken in front of the square
+			// operator, hence turns into 0.25
 			d.a[i][j] = ( sq(x.a[i+1][j  ]+x.a[i][j]-2.0)
 				 		+ sq(y.a[i  ][j+1]+y.a[i][j]    ) )*0.25;
 		}
@@ -856,12 +859,10 @@ Computes a field which would return the vorticity if the stored
 field was actually a velocity field. In other words, the result is
 %
 \begin{equation}
-\nabla \times \mathbf{U}.
+\nabla \times \mathbf{U} = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y}.
 \end{equation}
 %
 Gradients are computed using central scheme.
-\textcolor{red}{both gradients are computed at (i,j) and (i+1,j+1) and
-then averaged, why?}
 
 \begin{lstlisting}[style=myCpp]
 Field vorticity ()
@@ -871,12 +872,18 @@ Field vorticity ()
 	{
 		for ( int j=1 ; j<m-1 ; j++ )
 		{
-			// take the gradients and then compute the magnitude
+			// take the gradients and then compute the value at the cell centre
+			// Note: the flow is 2D, in 3D the result would be interpreted as the k_hat component of a vector field
 			// gradients approximated using central difference
+			// we need to first calculate the gradient at the positive and negative face
+			// by using neighbouring faces; for instance, for +ve x face we take faces at (i+1,j-1)
+			// and (i+1,j+1), subtract and divide by 2 delta_y; we repeat the same procedure at
+			// (i,j-1) and (i,j+1) and take the mean of the two values; proceeding analogously in
+			// the y-drection and taking the two divisions by 2 yields 0.25 and the following
 			d.a[i][j] = 0.25*(	x.a[i  ][j-1]-x.a[i  ][j+1]+ // -du/dy
-								x.a[i+1][j-1]-x.a[i+1][j+1]+ // -du/dy at i+1
+								x.a[i+1][j-1]-x.a[i+1][j+1]+ // -du/dy at face i+1
 								y.a[i+1][j  ]-y.a[i-1][j  ]+ // dv/dx
-								y.a[i+1][j+1]-y.a[i-1][j+1]); // dv/dx at j+1
+								y.a[i+1][j+1]-y.a[i-1][j+1]); // dv/dx at face j+1
 		}
 	}
 	return d;
@@ -924,7 +931,7 @@ Q = \frac{1}{2} \left(\left|\mathbf{\Omega}\right|^2
 \end{equation}
 \textcolor{red}{should this not be du\_i/dx\_j du\_j/dx\_i but without
 excluding the option with i=j? also, would there be a minus between the
-two terms?}
+two terms? like eq. 1 in:}
 \url{http://www.wseas.us/e-library/conferences/2011/Mexico/MAFLUH/MAFLUH-03.pdf}
 
 \begin{lstlisting}[style=myCpp]
@@ -935,6 +942,7 @@ Field Qcrit ()
 	{
 		for ( int j=1 ; j<m-1 ; j++ )
 		{
+			// compute finite differences at the (i,j) face using central scheme
 			float dudx = 0.5*(x.a[i+1][j  ]-x.a[i-1][j  ]);
 			float dudy = 0.5*(x.a[i  ][j+1]-x.a[i  ][j-1]);
 			float dvdx = 0.5*(y.a[i+1][j  ]-y.a[i-1][j  ]);
@@ -949,13 +957,6 @@ Field Qcrit ()
 % +++++++++++++++++++++++
 \subsubsection{Diffusion}
 
-Use second order linear scheme to compute the 2\textsuperscript{nd} spatial derivative around cell.
-In one dimension this could be written as
-%
-\begin{equation}
-\frac{\partial^2 \phi}{\partial x^2} \approx \phi(x-\Delta x) -2 \phi(x) + \phi(x + \Delta x) + O[\Delta x^2] .
-\end{equation}
-%
 Physically, this represents energy dissipation in the fluid. By assuming incompressibility, this
 becomes
 %
@@ -966,10 +967,18 @@ becomes
 \end{equation}
 %
 Note that this function computes the Laplacian for a single component of a vector field only.
+This is done using a second order linear scheme to compute the 2\textsuperscript{nd} spatial derivative around cell.
+In one dimension this can be written as
+%
+\begin{equation}
+\frac{\partial^2 \phi}{\partial x^2} \approx \phi(x-\Delta x) -2 \phi(x) + \phi(x + \Delta x) + O[\Delta x^2] .
+\end{equation}
 
 \begin{lstlisting}[style=myCpp]
 float diffusion (Field b, int i, int j)
 {
+	// use second order linear scheme to compute the 2nd spatial derivative around cell i,j
+	// compute d^2(phi)/d(x_i^2) values in the x- and y-directions and add
 	return b.a[i+1][j] + b.a[i][j+1] - 4*b.a[i][j] + b.a[i-1][j] + b.a[i][j-1];
 }
 \end{lstlisting}
@@ -990,15 +999,9 @@ float med(float a, float b, float c)
 % +++++++++++++++++++++++
 \subsubsection{Face value interpolation}
 
-\textcolor{red}{why use CF=1/6 in QUICK if most people quote it as 1/8?}
-
-\textcolor{red}{why the name "bho"?}
-
-\textcolor{red}{Why the med limiter is called with boundaries which seem to be
-	the cell value bc as long as bc is between the downwind and "test" upwind value?}
-
 In order to compute sum of the fluxes on each cell face, the cell-centre values
-need to be interpolated. This function makes use of the quadratic upwind scheme.
+need to be interpolated.
+The code uses Quadratic Upwind Interpolation for Convective Kinematics (QUICK) scheme in order to accomplish this. 
 For example, for the east face of a cell P located at $x$ this would be
 %
 \begin{equation}
@@ -1006,16 +1009,19 @@ For example, for the east face of a cell P located at $x$ this would be
 \phi(x+&\Delta x/2) \approx \\
 &\begin{cases}
 	\frac{1}{2}(\phi(x + \Delta x) + \phi(x)) - CF (\phi(x- \Delta x) -2 \phi(x) + \phi(x+\Delta x)) & \mbox{if } u(x)>0 \\
-	\frac{1}{2}(\phi(x + \Delta x) + \phi(x)) - CF (\phi(x) -2 \phi(x+\Delta x) + \phi(x+2\Delta x)) & \mbox{otherwise.}
+	\frac{1}{2}(\phi(x + \Delta x) + \phi(x)) - CF (\phi(x) -2 \phi(x+\Delta x) + \phi(x+2\Delta x)) & \mbox{otherwise,}
 \end{cases} 
 \end{aligned}
 \end{equation}
-
-QUICK, in order to accomplish this. 
+%
+where $CF$ is a tuning coefficient.
 
 \begin{lstlisting}[style=myCpp]
 float bho(Field b, int i, int j, int d1, int d2, float uf)
 {
+	// this function gets used in the advection() method in order to provide field values at the
+	// faces of the staggered cells; the returned value is the value at the (i+d1,j+d2) face
+		
 	// b - the field to be interpolated
 	// i,j - cell indices
 	// d1,d2 - tell us on which face from i,j the values are being computed
@@ -1043,7 +1049,7 @@ float bho(Field b, int i, int j, int d1, int d2, float uf)
 	if ( i>n-2 || i<2 || j>m-2 || j<2 ) return bf;
 	
 	// get the three values between which we want to fit a parabola
-	float bc = b.a[i][j]; // cell value
+	float bc = b.a[i][j]; // value at the point of interest
 	float bd = b.a[i+d1][j+d2]; // downwind value
 	float bu = b.a[i-d1][j-d2]; // upwind value
 	
@@ -1065,11 +1071,13 @@ float bho(Field b, int i, int j, int d1, int d2, float uf)
 % +++++++++++++++++++++++
 \subsubsection{Advection}
 
-Compute the advection of a field $b$ due to the velocity field described by
-this vector field object.
-The return value is the sum of fluxes of $b$ into the $ij$ cell.
+Compute the advection of a field $b$ due to the velocity field described by this vector field object.
+The return value is the sum of fluxes of $b$ into the $ij$ cell. Need to distinguish whether the values
+of the $b$ field are being stored on the negative x-faces or otherwise in order to construct appropriate
+staggered cells.
 
-\textcolor{red}{why distinguish based on the inlet which values to interpolate?}
+\textcolor{red}{todo: would be good to put in figures showing the mesh and staggered cells, highlighting how
+	the advection works; something like fig 6.3 on pp 126 from Murthy 2002 \url{https://engineering.purdue.edu/ME608/webpage/main.pdf}}
 
 \begin{lstlisting}[style=myCpp]
 float advection (Field b, int i, int j)
@@ -1078,20 +1086,21 @@ float advection (Field b, int i, int j)
 	float uo, ue, vs, vn;
 	
 	// get values on the faces
-	// if inlet is in the x-direction
 	if (b.btype == 1)
 	{
-		uo = 0.5*(x.a[i-1][j  ]+x.a[i  ][j  ]);
-		ue = 0.5*(x.a[i+1][j  ]+x.a[i  ][j  ]);
-		vs = 0.5*(y.a[i  ][j  ]+y.a[i-1][j  ]);
-		vn = 0.5*(y.a[i  ][j+1]+y.a[i-1][j+1]);
+		// if the values of the field to be convected are stored at the -ve x face we need convective
+		// velocities (\delta x_i)/2 away in each direction from the vertical faces
+		uo = 0.5*(x.a[i-1][j  ]+x.a[i  ][j  ]); // value at cell centre of (i-1,j)
+		ue = 0.5*(x.a[i+1][j  ]+x.a[i  ][j  ]); // c.c. value at (i,j)
+		vs = 0.5*(y.a[i  ][j  ]+y.a[i-1][j  ]); // value at SW corner of (i,j) cell
+		vn = 0.5*(y.a[i  ][j+1]+y.a[i-1][j+1]); // value at NW corner of (i,j) cell
 	}
 	else
 	{
-		uo = 0.5*(x.a[i  ][j-1]+x.a[i  ][j  ]);
-		ue = 0.5*(x.a[i+1][j-1]+x.a[i+1][j  ]);
-		vs = 0.5*(y.a[i  ][j-1]+y.a[i  ][j  ]);
-		vn = 0.5*(y.a[i  ][j  ]+y.a[i  ][j+1]);
+		uo = 0.5*(x.a[i  ][j-1]+x.a[i  ][j  ]); // value at SW corner of (i,j) cell
+		ue = 0.5*(x.a[i+1][j-1]+x.a[i+1][j  ]); // value at SE corner of (i,j) cell
+		vs = 0.5*(y.a[i  ][j-1]+y.a[i  ][j  ]); // c.c. value in the S cell of (i,j)
+		vn = 0.5*(y.a[i  ][j  ]+y.a[i  ][j+1]); // c.c. value in the (i,j) cell
 	}
 	// return the sum of fluxes of b INTO this cell - interpolate using QUICK scheme
 	return ( (uo*bho(b, i, j, -1, 0, uo) - ue*bho(b, i, j, 1, 0, ue))
@@ -1106,8 +1115,7 @@ Combine the advection and diffusion terms and advance the flow field in time by
 a single time step.
 Takes the old velocity value, $u0$, computes the momentum flux into each cell,
 accounts for diffusion, and updates the velocity field using a first-order
-Euler time method.
-\textcolor{red}{why use 2nd order RK in scalars but 1st order here?}
+Euler time method. No external forces (like the pressure gradient) are accounted for.
 
 \begin{lstlisting}[style=myCpp]
 void AdvDif(VectorField u0, float dt, float nu)
@@ -1117,8 +1125,8 @@ void AdvDif(VectorField u0, float dt, float nu)
 	{
 		for ( int i=1; i<n-1; i++)
 		{
-			v.x.a[i][j] = (advection(x, i, j) + nu*diffusion(x, i, j))*dt+u0.x.a[i][j];
-			v.y.a[i][j] = (advection(y, i, j) + nu*diffusion(y, i, j))*dt+u0.y.a[i][j];
+			v.x.a[i][j] = (advection(x, i, j) + nu*diffusion(x, i, j))*dt + u0.x.a[i][j];
+			v.y.a[i][j] = (advection(y, i, j) + nu*diffusion(y, i, j))*dt + u0.y.a[i][j];
 		}
 	}
 	this.eq(v);   
@@ -1126,11 +1134,31 @@ void AdvDif(VectorField u0, float dt, float nu)
 \end{lstlisting}
 
 % +++++++++++++++++++++++
+\subsubsection{Semi-Lagrangian advection}
+
+These two methods allow the components of the vector field to be advected with an external velocity
+field just as any scalar variable would.
+
+\begin{lstlisting}[style=myCpp]
+// advect each of the components of this field as simple scalar variables given an external
+// velocity field b; may use either 1st or 2nd order accuracy implemented in Field.pde
+void advect( float dt, VectorField b )
+{
+	x.advect(dt,b);
+	y.advect(dt,b);
+}
+
+void advect( float dt, VectorField b, VectorField b0 )
+{
+	x.advect(dt,b,b0);
+	y.advect(dt,b,b0);
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
 \subsubsection{CFL}
 
-\textcolor{red}{is this really a CFL number if it doesn't involve the time step and
-we take the inverse of maximum velocity? why include viscosity? why compute maximum
-velocity as u+v and not $sqrt(u^2+v^2)$?}
+This computes a custom stability criterion, in a way similar to the Courant and Peclet numbers.
 
 \begin{lstlisting}[style=myCpp]
 float CFL(float nu)
@@ -1149,6 +1177,279 @@ float CFL(float nu)
 	return 1./(b+3.*nu);
 }
 \end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Project}
+
+\textcolor{red}{do properly}
+
+\begin{lstlisting}[style=myCpp]
+Field project ( VectorField coeffs, Field p, Field s )
+{
+	/* projects u,v onto a divergence-free field using
+	div{coeffs*grad{p}} = div{u}  (1)
+	u -= coeffs*grad{p}           (2)
+	and returns the field p. all FDs are on unit cells */
+	p = MGsolver( 20, new PoissonMatrix(coeffs), p , s );
+	p.plusEq(-1*p.sum()/(float)((n-2)*(m-2)));
+	VectorField dp = p.gradient();
+	x.plusEq(coeffs.x.times(dp.x.times(-1)));
+	y.plusEq(coeffs.y.times(dp.y.times(-1)));
+	setBC();
+	return p;
+}
+\end{lstlisting}
+
+% =======================
+\section{Boundary data immersion method - BDIM}
+
+% -----------------------
+\subsection{Description}
+
+The core class in the code which implements the key functionality of the flow solver.
+
+\textcolor{red}{reference Maertens \& Weymouth, "Accurate Cartesian-grid simulations of near-body flows at intermediate Reynolds numbers", 2015}
+
+% -----------------------
+\subsection{Internal fields}
+
+\begin{itemize}
+\item \texttt{<int> n, m} - number of cells in the uniform grid
+\item \texttt{<float> dt} - time step of the simulation
+\item \texttt{<float> nu} - dissipation constant, or viscosity
+\item \texttt{<float> eps} - support of the BDIM kernels, given a constant value of 2 by default
+\item \texttt{<PVector> g} - body force per unit mass (gravity), given a constant value of (0,0) by default
+\item \texttt{<VectorField>}
+	\begin{itemize}
+	\item \texttt{u} - velocity field
+	\item \texttt{del} - zeroth moment of the smoothing kernel
+	\item \texttt{del1} - first moment of the smoothing kernel
+	\item \texttt{c} - 
+	\item \texttt{u0} - velocity field at the previous time step
+	\item \texttt{ub} - body velocity field
+	\item \texttt{wnx} - wall-normal direction to the nearest point on a body surface
+	\item \texttt{wny} - \textcolor{red}{check how these are stored exactly}
+	\item \texttt{distance} - distance from the nearest body to the cell centres
+	\item \texttt{rhoi} - inverse of local fluid density (equal to 1 for single-phase flow)
+	\end{itemize}
+\item \texttt{<Field> p} - pressure field
+\item \texttt{<boolean> QUICK} - whether to use the QUICK scheme in \textcolor{red}{check}
+\item \texttt{<boolean> mu1} - whether to use the first moment of the smoothing kernel, set as true by default
+\item \texttt{<boolean> adaptive} - whether to use adaptive \textcolor{red}{check}, defaults to false
+\end{itemize}
+
+% -----------------------
+\subsection{Methods}
+
+% +++++++++++++++++++++++
+\subsubsection{Constructor}
+
+The most important constructor. Several overloaded versions with simpler inputs also implemented.
+
+\textcolor{red}{check if x-velocity will ever have bval 0, otherwise what's the point of the gradientExit check?}
+
+\begin{lstlisting}[style=myCpp]
+BDIM( int n, int m, float dt, Body body, VectorField uinit, float nu, boolean QUICK )
+{
+	// set the constants
+	this.n = n;
+	this.m = m;
+	this.dt = dt;
+	this.nu=nu;
+	this.QUICK=QUICK;
+
+	u = uinit;
+	
+	if(u.x.bval!=0) u.x.gradientExit = true; // use gradient exit for the axial velocity
+	u0 = new VectorField(n,m,0,0);
+	p = new Field(n,m);
+	if(dt==0) setDt(); // adaptive time stepping for O(2) QUICK
+
+	ub  = new VectorField(n,m,0,0);
+	distance =  new VectorField(n, m, 10, 10);    
+	del = new VectorField(n,m,1,1);
+	del1 = new VectorField(n,m,0,0);
+	rhoi = new VectorField(del); // initialise with ones
+	c = new VectorField(del);
+	wnx = new VectorField(n,m,0,0);
+	wny = new VectorField(n,m,0,0);
+	get_coeffs(body); // computes various coefficients for the flow
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Get coefficients}
+
+Computes a range of coefficients needed to solve the flow.
+
+\begin{lstlisting}[style=myCpp]
+void get_coeffs( Body body )
+{
+	get_dist(body); // distance from the body
+	get_del(); // 0th BDIM kernel
+	get_del1(); // 1st BDIM kernel
+	get_ub(body); // body velocity
+	get_wn(body); // wall-normal direction to the nearest body
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Get distance}
+
+Calculates distance from the specified body to all of the cell centres.
+
+\begin{lstlisting}[style=myCpp]
+void get_dist( Body body )
+{
+	for ( int i=1 ; i<n-1 ; i++ )
+	{
+		for ( int j=1 ; j<m-1 ; j++ )
+		{
+			distance.x.a[i][j] = body.distance((float)(i-0.5), j);
+			distance.y.a[i][j] = body.distance(i, (float)(j-0.5));
+		}
+	}
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Get zeroth kernel moment}
+
+Compute the 0th order kernel moment for all cells given a body described using BDIM. This is called
+for each cell inside the \texttt{get\_del()} method. As in \textcolor{red}{ref}, this is expressed as
+%
+\begin{equation}\label{eq:label}
+\mu_0^\epsilon(d) =
+\begin{cases}
+\begin{aligned}
+&\frac{1}{2} \left \lbrack 1 + \frac{d}{\epsilon} + \frac{1}{\pi} \mathrm{sin} \left(\frac{d}{\epsilon} \pi \right) \right \rbrack,& \lvert d \rvert < \epsilon , \\
+&0,& d \leq -\epsilon, \\
+&1,& d \geq \epsilon ,
+\end{aligned}
+\end{cases}
+\end{equation}
+%
+where $\epsilon$ is a fixed kernel support width.
+
+\begin{lstlisting}[style=myCpp]
+// calculate the 0th BDIM kernel value given a distance from the nearest body
+float delta0( float d )
+{
+	if( d <= -eps ) // point inside the body
+	{
+		return 0;
+	}
+	else if( d >= eps ) // point well inside the flow
+	{
+		return 1;
+	}
+	else // point at the body-fluid interface, need to blend the solid and fluid equations
+	{
+		// eq. 16a in Maertens & Weymouth 2015
+		return 0.5*(1.0+d/eps+sin(PI*d/eps)/PI);
+	} 
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Get first kernel moment}
+
+Compute the 1st order kernel moment for all cells given a body described using BDIM. This is called
+for each cell inside the \texttt{get\_del1()} method. As in \textcolor{red}{ref}, this is expressed as
+%
+\begin{equation}\label{eq:label}
+\mu_1^\epsilon(d) =
+\begin{cases}
+\begin{aligned}
+& \epsilon \left \lbrack \frac{1}{4} -\left( \frac{d}{2\epsilon} \right)^2 - \frac{1}{2\pi} \left(\frac{d}{\epsilon} \mathrm{sin} \left(\frac{d}{\epsilon}\pi\right)
+	+\frac{1}{\pi} \left( 1+\mathrm{cos} \left( \frac{d}{\epsilon} \pi \right)\right)\right) \right \rbrack, &\lvert d \rvert < \epsilon , \\
+&0, &\lvert d \rvert  \geq -\epsilon.
+\end{aligned}
+\end{cases}
+\end{equation}
+
+\begin{lstlisting}[style=myCpp]
+// compute the 1st BDIM kernel
+float delta1( float d )
+{
+	if( abs(d) >= eps) // outside of the blending region
+	{
+		return 0;
+	}
+	else // inside the blending region use eq. 16b from Maertens & Weymouth 2015
+	{
+		return 0.25*(eps-sq(d)/eps)-1/TWO_PI*(d*sin(d*PI/eps)+eps/PI*(1+cos(d*PI/eps)));
+	} 
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Body velocity}
+
+Computes velocity of the body, including translation and rotation, at each location within the numerical domain.
+
+\begin{lstlisting}[style=myCpp]
+// calculates the velocity of the body at each location in the flow
+void get_ub( Body body )
+{
+	/* Immersed Velocity Field
+	ub(x) = U(x)*(1-del(x))
+	where U is the velocity of the body */
+	for ( int i=1 ; i<n-1 ; i++ )
+	{
+		for ( int j=1 ; j<m-1 ; j++ )
+		{
+			ub.x.a[i][j] = body.velocity(1,dt,(float)(i-0.5),j);
+			ub.y.a[i][j] = body.velocity(2,dt,i,(float)(j-0.5));
+		}
+	}
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Wall-normal direction}
+
+Evaluate wall-normal direction to the nearest point on an immersed body.
+
+\textcolor{red}{check where this gets used and make sure the distances are from face centres}
+
+\begin{lstlisting}[style=myCpp]
+// computes wall normal direction of the closest body point
+void get_wn(Body body)
+{
+	PVector wn;
+	for ( int i=1 ; i<n-1 ; i++ )
+	{
+		for ( int j=1 ; j<m-1 ; j++ )
+		{
+			wn = body.WallNormal((float)(i-0.5),j);
+			wnx.x.a[i][j]=wn.x;
+			wny.x.a[i][j]=wn.y;
+			wn = body.WallNormal(i,(float)(j-0.5));
+			wnx.y.a[i][j]=wn.x;
+			wny.y.a[i][j]=wn.y;
+		}
+	}   
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Update}
+
+\begin{lstlisting}[style=myCpp]
+
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{UpdateUP}
+
+\begin{lstlisting}[style=myCpp]
+
+\end{lstlisting}
+
+
+
+
 
 \begin{comment}
 % =======================
@@ -1172,7 +1473,10 @@ a
 % +++++++++++++++++++++++
 \subsubsection{a}
 
-a
+\begin{lstlisting}[style=myCpp]
+
+\end{lstlisting}
+
 \end{comment}
 
 \end{document}
