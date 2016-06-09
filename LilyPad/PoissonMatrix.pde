@@ -49,13 +49,17 @@ public class PoissonMatrix
 		{
 			for ( int j=1 ; j<m-1 ; j++ )
 			{
+				// sum values at all faces of the cell and assign them to the diagonal
+				// TODO what do the numbers mean?
 				float sumd = lower.x.a[i][j] + lower.x.a[i+1][j] + lower.y.a[i][j] + lower.y.a[i][j+1];
 				diagonal.a[i][j] = -sumd;
+				// compute inverse of the diagonal, be careful not to divide by zero
 				if(sumd>1e-5) inv.a[i][j] = -1./sumd;
 			}
 		}
 	}
 
+	// TODO not entirely sure what this does
 	Field times( Field x )
 	{
 		Field ab = new Field(n,m);
@@ -63,8 +67,8 @@ public class PoissonMatrix
 		{
 			for ( int j=1 ; j<m-1 ; j++ )
 			{
-				ab.a[i][j] = x.a[i  ][j  ]*diagonal.a[i][j]
-							+x.a[i-1][j  ]*lower.x.a[i  ][j  ]
+				ab.a[i][j] = x.a[i  ][j  ]*diagonal.a[i][j] // multiply diagonal terms
+							+x.a[i-1][j  ]*lower.x.a[i  ][j  ] // TODO what are these
 							+x.a[i+1][j  ]*lower.x.a[i+1][j  ]
 							+x.a[i  ][j-1]*lower.y.a[i  ][j  ]
 							+x.a[i  ][j+1]*lower.y.a[i  ][j+1];

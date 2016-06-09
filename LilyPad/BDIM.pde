@@ -99,65 +99,76 @@ class BDIM
 	BDIM( int n, int m, float dt, Body body){
 		this(n,m,dt,body,new VectorField(n,m,1,0),1,false);}
  
-// TODO advance the flow in time - 1st order time accuracy
-void update()
-{
-	// O(dt,dx^2) BDIM projection step:
-	c.eq(del.times(rhoi.times(dt))); // coefficient in front of the pressure gradient term in eq 33b and 34b in M&W'15
-
-	u0.eq(u); // keep the current velocity for future use at thet next time step
-	VectorField F = new VectorField(u); // this will hold the newly assembled flow equation of motion
-
-	// either solve simple convection or full conv-diff problem
-	if(QUICK)
-		F.AdvDif( u0, dt, nu );
-	else
-		F.advect( dt, u0 );
-
-	updateUP( F, c );
-}
-
-// TODO advance the flow in time - 2nd order time accuracy
-void update2()
-{
-	// O(dt^2,dt^2) BDIM correction step:
-	VectorField us = new VectorField(u);
-	F = new VectorField(u);
-	
-	// this uses the QUICK interpolation on a segregated mesh to solve the advection-diffusion problem
-	if(QUICK)
+	// advance the flow in time - 1st order time accuracy
+	void update()
 	{
-		F.AdvDif( u0, dt, nu );
+		// O(dt,dx^2) BDIM projection step:
+		c.eq(del.times(rhoi.times(dt))); // coefficient in front of the pressure gradient term in eq 33b and 34b in M&W'15
+
+		u0.eq(u); // keep the current velocity for future use at thet next time step
+		VectorField F = new VectorField(u); // this will hold the newly assembled flow equation of motion, including u_0
+
+		// either solve simple convection or full conv-diff problem
+		if(QUICK)
+			F.AdvDif( u0, dt, nu );
+		else
+			F.advect( dt, u0 );
+
 		updateUP( F, c );
-		u.plusEq(us); 
-		u.timesEq(0.5);
-		if(adaptive) dt = checkCFL();
 	}
-	// this advects each component of this field as a simple scalar variable
-	else
-	{
-		F.eq(u0.minus(p.gradient().times(rhoi.times(0.5*dt))));
-		F.advect(dt,us,u0);
-		updateUP( F, c.times(0.5) );
-	}
-}
 
-void updateUP( VectorField R, VectorField coeff )
-{
-	/*  Seperate out the pressure from the forcing
-		del*F = del*R+coeff*gradient(p)
-	Approximate update (dropping ddn(grad(p))) which doesn't affect the accuracy of the velocity
-		u = del*R+coeff*gradient(p)+[1-del]*u_b+del_1*ddn(R-u_b)
-	Take the divergence
-		div(u) = div(coeff*gradient(p)+stuff) = 0
-	u.project solves this equation for p and then projects onto u
-	*/
-	R.plusEq(PVector.mult(g,dt)); // assemble the mu_0 term with u^0 in eq. 33a in M&W 2015; add body force
-	u.eq(del.times(R).minus(ub.times(del.plus(-1)))); // 1st order BDIM using only zeroth moment - first part of eq 33a
-	if(mu1) u.plusEq(del1.times((R.minus(ub)).normalGrad(wnx,wny))); // add the 2nd order terms - full eq. 33a
-	u.setBC(); // set inflow/outflow and other BCs
-	p = u.project(coeff,p); // make sure the velocity field is divergence free by adjusting the pressure correcition - eqns. 33b and 33c
-}
+	// advance the flow in time - 2nd order time accuracy
+	void update2()
+	{
+		// O(dt^2,dt^2) BDIM correction step:
+		// us holds the divergence-free velocity field obtained during the first Euler step, therefore 1st order
+		// accurate in time
+		VectorField us = new VectorField(u);
+		VectorField F = new VectorField(u);
+	
+		// this uses the QUICK interpolation on a segregated mesh to solve the advection-diffusion problem
+		if(QUICK)
+		{
+			// evaluate the flow using BDIM starting from the velocity computed during the first step
+			F.AdvDif( u0, dt, nu );
+			updateUP( F, c );
+		
+			// Heun's corrector - take average of U(U_0) and U(U_1)
+			u.plusEq(us); 
+			u.timesEq(0.5);
+		
+			// adjust time step to maintain stability
+			if(adaptive) dt = checkCFL();
+		}
+		// this advects each component of this field as a simple scalar variable
+		else
+		{
+			F.eq(u0.minus(p.gradient().times(rhoi.times(0.5*dt))));
+			F.advect(dt,us,u0);
+			updateUP( F, c.times(0.5) );
+		}
+	}
+
+	void updateUP( VectorField R, VectorField coeff )
+	{
+		/*  Seperate out the pressure from the forcing
+			del*F = del*R+coeff*gradient(p)
+		Approximate update (dropping ddn(grad(p))) which doesn't affect the accuracy of the velocity
+			u = del*R+coeff*gradient(p)+[1-del]*u_b+del_1*ddn(R-u_b)
+		Take the divergence
+			div(u) = div(coeff*gradient(p)+stuff) = 0
+		u.project solves this equation for p and then projects onto u
+		*/
+		R.plusEq(PVector.mult(g,dt)); // assemble the mu_0 term with u^0 in eq. 33a in M&W 2015; add body force
+		u.eq(del.times(R).minus(ub.times(del.plus(-1)))); // 1st order BDIM using only zeroth moment - first part of eq 33a
+		if(mu1) u.plusEq(del1.times((R.minus(ub)).normalGrad(wnx,wny))); // add the 2nd order terms - full eq. 33a
+		u.setBC(); // set inflow/outflow and other BCs
+		// make sure the velocity field is divergence free by adjusting the pressure correcition - eqns. 33b and 33c
+		// the overloaded implementation of project is called which neglects the divergence which could
+		// be created by changes to the geometry of the immersed body
+		// TODO why?
+		p = u.project(coeff,p);
+	}
 
 	// overloaded update methods which update coefficients if the immersed body is moving
 	void update( Body body )

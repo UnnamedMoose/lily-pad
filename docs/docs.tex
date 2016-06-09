@@ -45,19 +45,8 @@ moredelim=**[is][\color{red}]{@}{@} % add @ delimiter and colour the stuff betwe
 
 %%%%%
 \begin{abstract}
-Somebody else’s code is always hard, let's break it down!
 
-Most of the stuff in red has the same root issue. The variables are not collocated. Field.btype defines
-where the variable is located. 0 is cell center, 1 is on the negative x face of the cell, 2 is on the
-negative y face. This is why the interpolation changes depending on btype, and why the values of vorticity
-and ke are averaged (because I'm taking the average of the face values to get the cell centered value),
-and why it looks like I'm using first order difference in the gradient (actually second order central).
-
-The CFL is my own condition. I haven't seen anyone else use it, though I'm not sure why. This is the
-fundamental condition which determines stability of a connection diffusion problem. Maybe I should write it up in a tech note.
-
-The quick scheme is called twice in bdim (predictor/corrector) which makes it second order overall.
-I would guess bho is "b high-order", but I didn't write any of that code, so I'm not sure.
+.
 
 \end{abstract}
 
@@ -789,6 +778,33 @@ fore brevity.
 \subsection{Methods}
 
 % +++++++++++++++++++++++
+\subsubsection{Normal gradient}
+
+This computes the gradient of the velocity components similarly to how it is done for the scalar
+field class.
+
+\begin{lstlisting}[style=myCpp]
+// compute gradient in a normal direction
+// wnx and wny are wall-normal x- and y-directions with their
+// VectorField.x holding the actual values in x- and y-dirs
+VectorField normalGrad(VectorField wnx, VectorField wny)
+{
+	VectorField g = new VectorField(n,m,0,0);
+	for ( int i=1 ; i<n-1 ; i++ )
+	{
+		for ( int j=1 ; j<m-1 ; j++ )
+		{
+			g.x.a[i][j] = 0.5*(wnx.x.a[i][j]*(x.a[i+1][j  ]-x.a[i-1][j  ])
+							  +wny.x.a[i][j]*(x.a[i  ][j+1]-x.a[i  ][j-1]));
+			g.y.a[i][j] = 0.5*(wnx.y.a[i][j]*(y.a[i+1][j  ]-y.a[i-1][j  ])
+							  +wny.y.a[i][j]*(y.a[i  ][j+1]-y.a[i  ][j-1]));
+		}
+	}
+	return g; 
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
 \subsubsection{Divergence}
 
 What else, computes divergence of the field, in other words
@@ -1181,23 +1197,152 @@ float CFL(float nu)
 % +++++++++++++++++++++++
 \subsubsection{Project}
 
-\textcolor{red}{do properly}
+This accepts the coefficients on the left-hand side of the Poisson equation, computed
+in \texttt{BDIM::update()}, the pressure field from the previous time step, and the
+divergence of the recently computed velocity field. The latter may be viewed as the
+discrepancy between the desired divergence-free field and what was computed using the
+initial BDIM step.
+First, the Poisson equation is assembled into the matrix format. This is then passed to
+the multi-grid solver in order to find a pressure field whose gradient will correct
+the velocity in such a way as to enforce continuity, or
+%
+\begin{equation}\label{eq:PoissonEquation}
+\Delta t \nabla \cdot \left( \frac{\mu_0^\epsilon}{\rho} \nabla p_0 \right) = 
+	\nabla \cdot \mathbf{U'} - (1-\mu_0^\epsilon ) \nabla \cdot \mathbf{U_B} .
+\end{equation}
+%
+\textcolor{red}{the part associated with velocity divergence due the the body
+velocity gets omitted, any reason for this? maybe Lilypad only deals with solid
+bodies or there's a separate extension which incorporates this?}
+Once this has been found, the step in equation 33 c in M\&W 2015 may be undertaken,
+by first computing the pressure gradient and then evaluating the corrected, divergence-free
+velocity field
+%
+\begin{equation}\label{eq:PoissonCorrection}
+\mathbf{U_1} = \mathbf{U'} - \Delta t \frac{\mu_0^\epsilon}{\rho} \nabla p_0 .
+\end{equation}
+
+\textcolor{red}{what's the p.sum() bit about?}
 
 \begin{lstlisting}[style=myCpp]
+// enforce continuity by solving the Poisson equation for this velocity field
 Field project ( VectorField coeffs, Field p, Field s )
 {
 	/* projects u,v onto a divergence-free field using
 	div{coeffs*grad{p}} = div{u}  (1)
 	u -= coeffs*grad{p}           (2)
 	and returns the field p. all FDs are on unit cells */
+	
+	// solves the equation of form Ax=b where A - Poisson matrix, b - s (div(U)), x - p
 	p = MGsolver( 20, new PoissonMatrix(coeffs), p , s );
+	
+	// TODO what does this do? some sort of normalisation
 	p.plusEq(-1*p.sum()/(float)((n-2)*(m-2)));
+	
+	// compute grad(p)
 	VectorField dp = p.gradient();
+	
+	// velocity correction - 33c in M&W'15
 	x.plusEq(coeffs.x.times(dp.x.times(-1)));
 	y.plusEq(coeffs.y.times(dp.y.times(-1)));
 	setBC();
 	return p;
 }
+\end{lstlisting}
+
+% =======================
+\section{Poisson matrix}
+
+% -----------------------
+\subsection{Description}
+
+This is used to assemble the Poisson equation of form
+%
+\begin{equation}\label{eq:PoissonLHS}
+\nabla \cdot (C \nabla p) = b ,
+\end{equation}
+%
+where $b$ is a right-hand side that may incorporate various terms and $C$ is a matrix of coefficients.
+This method is linked directly to the multigrid solver for all your computational needs.
+
+\textcolor{red}{Not entirely sure about some of the things, there should be more info here:
+\url{http://ocw.mit.edu/courses/mathematics/18-086-mathematical-methods-for-engineers-ii-spring-2006/readings/am35.pdf}}
+
+% -----------------------
+\subsection{Internal fields}
+
+\begin{itemize}
+\item \texttt{<int> n, m} - number of cells in the uniform grid
+\item \texttt{<VectorField> lower} - coefficients of the lower diagonal part of the equation
+\item \texttt{<Field> diagonal} - matrix with the diagonal terms
+\item \texttt{<Field> inv} - matrix filled with inverse values of the diagonal
+\end{itemize}
+
+% -----------------------
+\subsection{Methods}
+
+% +++++++++++++++++++++++
+\subsubsection{Constructor}
+
+\textcolor{red}{check what exactly sumd is}
+
+\begin{lstlisting}[style=myCpp]
+// construct given the coefficients matrix
+PoissonMatrix( VectorField lower )
+{
+	this.n = lower.n;
+	this.m = lower.m;
+	this.lower = new VectorField(lower);
+	diagonal = new Field(n,m);
+	inv = new Field(n,m,0,1);
+	
+	for ( int i=1 ; i<n-1 ; i++ )
+	{
+		for ( int j=1 ; j<m-1 ; j++ )
+		{
+			// sum values at all faces of the cell and assign them to the diagonal
+			float sumd = lower.x.a[i][j] + lower.x.a[i+1][j] + lower.y.a[i][j] + lower.y.a[i][j+1];
+			diagonal.a[i][j] = -sumd;
+			// compute inverse of the diagonal, be careful not to divide by zero
+			if(sumd>1e-5) inv.a[i][j] = -1./sumd;
+		}
+	}
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Multiplication}
+
+\textcolor{red}{check what exactly this does}
+
+\begin{lstlisting}[style=myCpp]
+Field times( Field x )
+{
+	Field ab = new Field(n,m);
+	for ( int i=1 ; i<n-1 ; i++ )
+	{
+		for ( int j=1 ; j<m-1 ; j++ )
+		{
+			ab.a[i][j] = x.a[i  ][j  ]*diagonal.a[i][j] // multiply diagonal terms
+						+x.a[i-1][j  ]*lower.x.a[i  ][j  ]
+						+x.a[i+1][j  ]*lower.x.a[i+1][j  ]
+						+x.a[i  ][j-1]*lower.y.a[i  ][j  ]
+						+x.a[i  ][j+1]*lower.y.a[i  ][j+1];
+		}
+	}
+	return ab;
+}
+\end{lstlisting}
+
+% +++++++++++++++++++++++
+\subsubsection{Residual}
+
+Gets called from the MG solver only.
+\textcolor{red}{check what exactly this does}
+
+\begin{lstlisting}[style=myCpp]
+Field residual( Field b, Field x ) {
+	return b.plus(this.times(x).times(-1)); }
 \end{lstlisting}
 
 % =======================
@@ -1209,6 +1354,26 @@ Field project ( VectorField coeffs, Field p, Field s )
 The core class in the code which implements the key functionality of the flow solver.
 
 \textcolor{red}{reference Maertens \& Weymouth, "Accurate Cartesian-grid simulations of near-body flows at intermediate Reynolds numbers", 2015}
+
+The basic outline of using the class to solve a flow past an object is:
+
+\begin{itemize}
+\item Initialise a body and BDIM objects inside the \texttt{setup()} method in Processing
+\item Iterate in time using the \texttt{draw()} function, during which
+	\begin{itemize}
+	\item Update position, velocity, and shape of the body (\texttt{Body::update()})
+	\item Update coefficients due to the body, such as the wall-normal directions and distances,
+		as well as BDIM kernels (\texttt{BDIM::update(body)})
+	\item Still inside \texttt{BDIM::update()} advect the flow to obtain a new velocity field which
+		does not necessarily satisfy continuity
+	\item Call \texttt{BDIM::updateUP()} in order to assemble the Poisson equation and solve it using
+		\texttt{VectorField::project()}
+	\item Repeat the solution step again using \texttt{BDIM::update2()}, average the velocity fields
+		obtained from the two updates in order to achieve second order accuracy in time (Euler integration
+		with Heun's corrector)
+	\item Apply post-processing, move on to the next time step
+	\end{itemize}
+\end{itemize}
 
 % -----------------------
 \subsection{Internal fields}
@@ -1227,15 +1392,16 @@ The core class in the code which implements the key functionality of the flow so
 	\item \texttt{c} - 
 	\item \texttt{u0} - velocity field at the previous time step
 	\item \texttt{ub} - body velocity field
-	\item \texttt{wnx} - wall-normal direction to the nearest point on a body surface
-	\item \texttt{wny} - \textcolor{red}{check how these are stored exactly}
+	\item \texttt{wnx, wny} - wall-normal direction to the nearest point on a body surface; these correspond
+		to wall-normal x- and y-directions with their \texttt{VectorField::x} holding the actual values in x- and y-directions
 	\item \texttt{distance} - distance from the nearest body to the cell centres
 	\item \texttt{rhoi} - inverse of local fluid density (equal to 1 for single-phase flow)
 	\end{itemize}
 \item \texttt{<Field> p} - pressure field
-\item \texttt{<boolean> QUICK} - whether to use the QUICK scheme in \textcolor{red}{check}
+\item \texttt{<boolean> QUICK} - whether to solve the advection-diffusion problem (when set to true) or whether
+	to use semi-Lagrangian convection
 \item \texttt{<boolean> mu1} - whether to use the first moment of the smoothing kernel, set as true by default
-\item \texttt{<boolean> adaptive} - whether to use adaptive \textcolor{red}{check}, defaults to false
+\item \texttt{<boolean> adaptive} - whether to use adaptive time step
 \end{itemize}
 
 % -----------------------
@@ -1436,19 +1602,155 @@ void get_wn(Body body)
 % +++++++++++++++++++++++
 \subsubsection{Update}
 
-\begin{lstlisting}[style=myCpp]
+First, evaluates the constant coefficients that come into the Poisson equation,
+%
+\begin{equation}\label{eq:PoissonCoeffsLhs}
+c = \frac{\mu_0^\epsilon \Delta t}{\rho} ,
+\end{equation}
+%
+thereby preparing for steps 33 b and 34 b in Maertens \& Weymouth (2015).
+The current velocity field is then copied and stored in order to allow
+time interpolation later on.
+The flow equation of motion, rearranged for use in the BDIM method,
+%
+\begin{equation}\label{eq:BDIM_NS}
+\mathbf{U}_0 + \mathbf{r}_{\Delta t}(\mathbf{U}) =
+	\mathbf{U}_0 + \Delta t \left \lbrack -(\mathbf{U} \cdot \nabla) \mathbf{U}
+		+ \nu \nabla^2 \mathbf{U} \right \rbrack ,
+\end{equation}
+%
+is then prepared using \texttt{VectorField::AdvDiff()}. This forms the first part
+of steps 33 a and 34 a in the M\&W 2015.
+The \texttt{updateUP()} method is then called to solve the Poisson equation.
 
+\begin{lstlisting}[style=myCpp]
+// advance the flow in time - 1st order time accuracy
+void update()
+{
+	// O(dt,dx^2) BDIM projection step:
+	c.eq(del.times(rhoi.times(dt))); // coefficient in front of the pressure gradient term in eq 33b and 34b in M&W'15
+
+	u0.eq(u); // keep the current velocity for future use at thet next time step
+	VectorField F = new VectorField(u); // this will hold the newly assembled flow equation of motion
+
+	// either solve simple convection or full conv-diff problem
+	if(QUICK)
+		F.AdvDif( u0, dt, nu );
+	else
+		F.advect( dt, u0 );
+
+	updateUP( F, c );
+}
 \end{lstlisting}
 
 % +++++++++++++++++++++++
 \subsubsection{UpdateUP}
 
-\begin{lstlisting}[style=myCpp]
+\textcolor{red}{First, the body force (not included in the original reference) is added to the
+right-hand side of equations 33a and 34b as}
+%
+\begin{equation}\label{eq:BDIM_bodyForce}
+\mathbf{G} = \mathbf{g} \Delta t .
+\end{equation}
+%
+The result is then used to perform the first part of eq. 33 a,
+%
+\begin{equation}\label{eq:BDIM_1stOrder_step1a}
+\mathbf{U'} = \mu_0^\epsilon \left(\mathbf{U}_0 + \mathbf{r}_{\Delta t}(\mathbf{U}) \right)
+	- (1-\mu_0^\epsilon) \mathbf{U_B} ,
+\end{equation}
+%
+where $\mathbf{U_B}$ is the body velocity. The first moment kernel contribution
+is then optionally added as
+%
+\begin{equation}\label{eq:BDIM_1stOrder_step1b}
+\mathbf{U'} += \mu_1^\epsilon \frac{\partial}{\partial n} \left( \mathbf{U}_0 + \mathbf{r}_{\Delta t}(\mathbf{U}) - \mathbf{U_B} \right) .
+\end{equation}
+%
+This yields an updated velocity field which does not necessarily satisfy the continuity
+equation. This is then enforced by referring to \texttt{VectorField::project()} and
+solving the Poisson equation.
+Note that until now the effect of pressure gradient was ignored, analogously to how
+M\&W manipulate the governing flow equations between eq. 26 and 33. This is done in
+a similar fashion to the typical predictor-corrector approach for finite volume CFD.
 
+\begin{lstlisting}[style=myCpp]
+void updateUP( VectorField R, VectorField coeff )
+{
+	/*  Seperate out the pressure from the forcing
+		del*F = del*R+coeff*gradient(p)
+	Approximate update (dropping ddn(grad(p))) which doesn't affect the accuracy of the velocity
+		u = del*R+coeff*gradient(p)+[1-del]*u_b+del_1*ddn(R-u_b)
+	Take the divergence
+		div(u) = div(coeff*gradient(p)+stuff) = 0
+	u.project solves this equation for p and then projects onto u
+	*/
+	R.plusEq(PVector.mult(g,dt)); // assemble the mu_0 term with u^0 in eq. 33a in M&W 2015; add body force
+	u.eq(del.times(R).minus(ub.times(del.plus(-1)))); // 1st order BDIM using only zeroth moment - first part of eq 33a
+	if(mu1) u.plusEq(del1.times((R.minus(ub)).normalGrad(wnx,wny))); // add the 2nd order terms - full eq. 33a
+	u.setBC(); // set inflow/outflow and other BCs
+	// make sure the velocity field is divergence free by adjusting the pressure correcition - eqns. 33b and 33c
+	// the overloaded implementation of project is called which neglects the divergence which could
+	// be created by changes to the geometry of the immersed body
+	// TODO why?
+	p = u.project(coeff,p);
+}
 \end{lstlisting}
 
+% +++++++++++++++++++++++
+\subsubsection{Update2}
 
+This method gets called after \texttt{update()} and is used in order to ensure second-order
+accuracy in time. 
+In general, it involves identical steps to the first-order update step, except the initial
+condition is not the velocity from the old time step but the one obtained during the
+initial predictor-corrector solution.
+Once the new velocity field satisfying continuity has been estimated, two solutions are effectively
+available:
+%
+\begin{equation}\label{eq:HeunCorrector}
+\begin{aligned}
+\mathbf{U}_1(t_0 + \Delta t) &= f(\mathbf{U}_0(t),t+\Delta t) , \\
+\mathbf{U}_2(t_0 + \Delta t) &= f(\mathbf{U}_1(t+\Delta t),t+\Delta t) .
+\end{aligned}
+\end{equation}
+%
+Heun's approach involves using the average of the two estimates to be the value at the new
+time step.
 
+\begin{lstlisting}[style=myCpp]
+// advance the flow in time - 2nd order time accuracy
+void update2()
+{
+	// O(dt^2,dt^2) BDIM correction step:
+	// us holds the divergence-free velocity field obtained during the first Euler step, therefore 1st order
+	// accurate in time
+	VectorField us = new VectorField(u);
+	VectorField F = new VectorField(u);
+	
+	// this uses the QUICK interpolation on a segregated mesh to solve the advection-diffusion problem
+	if(QUICK)
+	{
+		// evaluate the flow using BDIM starting from the velocity computed during the first step
+		F.AdvDif( u0, dt, nu );
+		updateUP( F, c );
+		
+		// Heun's corrector - take average of U(U_0) and U(U_1)
+		u.plusEq(us); 
+		u.timesEq(0.5);
+		
+		// adjust time step to maintain stability
+		if(adaptive) dt = checkCFL();
+	}
+	// this advects each component of this field as a simple scalar variable
+	else
+	{
+		F.eq(u0.minus(p.gradient().times(rhoi.times(0.5*dt))));
+		F.advect(dt,us,u0);
+		updateUP( F, c.times(0.5) );
+	}
+}
+\end{lstlisting}
 
 
 \begin{comment}

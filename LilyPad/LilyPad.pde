@@ -20,8 +20,8 @@ void setup(){
   Window view = new Window(n,n);
 
   body = new CircleBody(n/3,n/2,n/8,view); // define geometry - circle
-  flow = new BDIM(n,n,1.5,body);           // solve for flow using BDIM
-//  flow = new BDIM(n,n,0,body,0.01,true);   // QUICK with adaptive dt
+//  flow = new BDIM(n,n,1.5,body);           // solve for flow using BDIM
+  flow = new BDIM(n,n,0,body,0.01,true);   // QUICK with adaptive dt
   flood = new FloodPlot(view);
   flood.range = new Scale(-.75,.75);
   flood.setLegend("vorticity");
@@ -35,4 +35,5 @@ void draw(){
 }
 void mousePressed(){body.mousePressed();}
 void mouseReleased(){body.mouseReleased();}
+
 /*======================================*/

@@ -186,26 +186,34 @@ class VectorField
 		return psi;
 	}
 
-// TODO do these two
-Field project ( VectorField coeffs, Field p, Field s )
-{
-	/* projects u,v onto a divergence-free field using
-	div{coeffs*grad{p}} = div{u}  (1)
-	u -= coeffs*grad{p}           (2)
-	and returns the field p. all FDs are on unit cells */
-	p = MGsolver( 20, new PoissonMatrix(coeffs), p , s );
-	p.plusEq(-1*p.sum()/(float)((n-2)*(m-2)));
-	VectorField dp = p.gradient();
-	x.plusEq(coeffs.x.times(dp.x.times(-1))); // velocity correction - 33c in M&W'15
-	y.plusEq(coeffs.y.times(dp.y.times(-1)));
-	setBC();
-	return p;
-}
+	// enforce continuity by solving the Poisson equation for this velocity field
+	Field project ( VectorField coeffs, Field p, Field s )
+	{
+		/* projects u,v onto a divergence-free field using
+		div{coeffs*grad{p}} = div{u}  (1)
+		u -= coeffs*grad{p}           (2)
+		and returns the field p. all FDs are on unit cells */
+	
+		// solves the equation of form Ax=b where A - Poisson matrix, b - s (div(U)), x - p
+		p = MGsolver( 20, new PoissonMatrix(coeffs), p , s );
+	
+		// TODO what does this do? some sort of normalisation
+		p.plusEq(-1*p.sum()/(float)((n-2)*(m-2)));
+	
+		// compute grad(p)
+		VectorField dp = p.gradient();
+	
+		// velocity correction - 33c in M&W'15
+		x.plusEq(coeffs.x.times(dp.x.times(-1)));
+		y.plusEq(coeffs.y.times(dp.y.times(-1)));
+		setBC();
+		return p;
+	}
 
-// wrapper which assumes this field is the velocity field and hence supplies
-// divergence of itself to the actual function
-Field project ( VectorField coeffs, Field p ){
-	return project( coeffs, p, this.divergence() ); }
+	// wrapper which assumes this field is the velocity field and hence supplies
+	// divergence of itself to the actual function
+	Field project ( VectorField coeffs, Field p ){
+		return project( coeffs, p, this.divergence() ); }
 
 	// print on the screen
 	void display( float unit, int skip)
