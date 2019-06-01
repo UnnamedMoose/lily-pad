@@ -14,7 +14,7 @@ void setup(){
   VectorField c = new VectorField(N,N,0,0);
   c.x.eq(1); c.y.eq(1); c.setBC();
   Field p = new Field(N,N);
-  u.project(c,p);
+//  u.project(c,p);  // uncomment to see the effect of projection on the divergence.
   u.divergence().display(-.1,.1);
 }
 ***********************************/
@@ -46,31 +46,27 @@ class VectorField
 	// copy
 	VectorField( VectorField b ){this( b.x, b.y );}
 
-	// set BCs for both of the component fields
-	void setBC()
-	{
-		x.setBC(); 
-		y.setBC(); 
-	}
+  Field ke (){
+    // returns 0.5*{this-bval}^2 for unit cells
+    Field d = new Field( n, m );
+    for ( int i=1 ; i<n-1 ; i++ ) {
+    for ( int j=1 ; j<m-1 ; j++ ) {
+      d.a[i][j] = (sq(x.a[i+1][j]+x.a[i][j]-2.*x.bval)+
+                   sq(y.a[i][j+1]+y.a[i][j]-2.*y.bval))*0.125;
+    }}
+    return d;
+  }
 
-	// compute gradient in a normal direction
-	// wnx and wny are wall-normal x- and y-directions with their
-	// VectorField.x holding the actual values in x- and y-dirs
-	VectorField normalGrad(VectorField wnx, VectorField wny)
-	{
-		VectorField g = new VectorField(n,m,0,0);
-		for ( int i=1 ; i<n-1 ; i++ )
-		{
-			for ( int j=1 ; j<m-1 ; j++ )
-			{
-				g.x.a[i][j] = 0.5*(wnx.x.a[i][j]*(x.a[i+1][j  ]-x.a[i-1][j  ])
-								  +wny.x.a[i][j]*(x.a[i  ][j+1]-x.a[i  ][j-1]));
-				g.y.a[i][j] = 0.5*(wnx.y.a[i][j]*(y.a[i+1][j  ]-y.a[i-1][j  ])
-								  +wny.y.a[i][j]*(y.a[i  ][j+1]-y.a[i  ][j-1]));
-			}
-		}
-		return g; 
-	}
+  Field curl (){
+    // returns curl{this} located at cell corner (btype=3)
+    Field d = new Field( n, m, 3, 0 );
+    for ( int i=1 ; i<n-1 ; i++ ) {
+    for ( int j=1 ; j<m-1 ; j++ ) {
+      d.a[i][j] = x.a[i][j-1]-x.a[i][j]+
+                  y.a[i][j]-y.a[i-1][j];
+    }}
+    return d;
+  }
 
 	// returns div{this} for unit cells
 	Field divergence ()
@@ -153,7 +149,7 @@ class VectorField
 		}
 		return q;
 	}
-	
+
 	Field streamFunc()
 	{
 		//Integrates the flow field to get a stream function
@@ -164,7 +160,7 @@ class VectorField
 		//Integrate from top left corner
 		for (int i=0 ; i<n ; i++ )
 			s1[i][0] = 0;
-		
+
 		for (int i=0 ; i<n ; i++ )
 			for (int j=1 ; j<m ; j++ )
 				s1[i][j] = s1[i][j-1]+0.5*(x.a[i][j-1]+x.a[i][j]);
@@ -173,7 +169,7 @@ class VectorField
 		s2[n-1][m-1]=0;
 		for (int i=n-2; i>=0; i--)
 			s2[i][m-1] = 0;
-		
+
 		for (int i=0 ; i<n ; i++ )
 			for (int j=m-2 ; j>=0; j-- )
 				s2[i][j] = s2[i][j+1]-0.5*(x.a[i][j+1]+x.a[i][j]);
@@ -182,7 +178,7 @@ class VectorField
 		float basepsi = s2[0][0];
 		for (int i=0 ; i<n ; i++ )
 			for (int j=0 ; j<m ; j++ )
-				psi.a[i][j] = 0.5*(s1[i][j] + s2[i][j]-basepsi);    
+				psi.a[i][j] = 0.5*(s1[i][j] + s2[i][j]-basepsi);
 		return psi;
 	}
 
@@ -193,16 +189,16 @@ class VectorField
 		div{coeffs*grad{p}} = div{u}  (1)
 		u -= coeffs*grad{p}           (2)
 		and returns the field p. all FDs are on unit cells */
-	
+
 		// solves the equation of form Ax=b where A - Poisson matrix, b - s (div(U)), x - p
 		p = MGsolver( 20, new PoissonMatrix(coeffs), p , s );
-	
+
 		// TODO what does this do? some sort of normalisation
 		p.plusEq(-1*p.sum()/(float)((n-2)*(m-2)));
-	
+
 		// compute grad(p)
 		VectorField dp = p.gradient();
-	
+
 		// velocity correction - 33c in M&W'15
 		x.plusEq(coeffs.x.times(dp.x.times(-1)));
 		y.plusEq(coeffs.y.times(dp.y.times(-1)));
@@ -232,7 +228,7 @@ class VectorField
 		}
 		noStroke();
 	}
-	
+
 	private void arrow(float x1, float y1, float x2, float y2)
 	{
 		float a = atan2(x1-x2, y2-y1);
@@ -245,52 +241,52 @@ class VectorField
 		line(0, 0, -b, -b);
 		line(0, 0,  b, -b);
 		popMatrix();
-	} 
+	}
 
 	// QUICK scheme implementation
 	float bho(Field b, int i, int j, int d1, int d2, float uf)
 	{
 		// this function gets used in the advection() method in order to provide field values at the
 		// faces of the staggered cells; the returned value is the value at the (i+d1,j+d2) face
-		
+
 		// b - the field to be interpolated
 		// i,j - cell indices
 		// d1,d2 - tell us on which face from i,j the values are being computed
 		// uf - convection velocity on the face of interest
-		
+
 		// this part remains the same irrespectively of where the flow is coming from
 		// note that it represents simple linear interpolation between cell i,j and i+d1,j+d2
 		float bf =  0.5*(b.a[i+d1][j+d2]+b.a[i][j]);
-		
+
 		// check if the flow is in the negative direction - if yes then we need to
 		// shift the stencil by one node UPWIND
 		if (d1*uf<0)
 		{
-			i += d1; 
+			i += d1;
 			d1 = -d1;
 		}
-		
+
 		if (d2*uf<0)
 		{
 			j += d2;
 			d2 = -d2;
 		}
-		
+
 		// if the stencil exceeds the grid dimensions then simply switch to a linear scheme
 		if ( i>n-2 || i<2 || j>m-2 || j<2 ) return bf;
-		
+
 		// get the three values between which we want to fit a parabola
 		float bc = b.a[i][j]; // value at the point of interest
 		float bd = b.a[i+d1][j+d2]; // downwind value
 		float bu = b.a[i-d1][j-d2]; // upwind value
-		
+
 		// bf is the typical QUICK implementation now, except the CF coefficient may be varied
 		bf -= CF*(bd-2*bc+bu);
-		
+
 		// this is a test which approximates the face value by taking the upwind value,
 		// and then going 10 d(phi)/dx from it
 		float b1 = bu+S*(bc-bu);
-		
+
 		// this bounds the solution in some way between the cell value and a pre-set limit
 		// with respect to the upwind cell
 		return med(bf, bc,
@@ -298,142 +294,25 @@ class VectorField
 			);
 	}
 
-	float med(float a, float b, float c)
-	{
-		// if b and c are bound limits then the passed value a is guaranteed to
-		// fall between b and c
-		
-		return(max(min(a, b),min(max(a, b),c)));
-	}
-	
-	float diffusion (Field b, int i, int j)
-	{
-		// use second order linear scheme to compute the 2nd spatial derivative around cell i,j
-		// compute d^2(phi)/d(x_i^2) values in the x- and y-directions and add
-		return b.a[i+1][j] + b.a[i][j+1] - 4*b.a[i][j] + b.a[i-1][j] + b.a[i][j-1];
-	}
-	
-	// simple Lagrangian advection of the fluid
-	float advection (Field b, int i, int j)
-	{
-		// face velocity values - w,e,s,n
-		float uo, ue, vs, vn;
-		
-		// get convective velocity values on the faces
-		if (b.btype == 1)
-		{
-			// if the values of the field to be convected are stored at the -ve x face we need convective
-			// velocities (\delta x_i)/2 away in each direction from the vertical faces
-			uo = 0.5*(x.a[i-1][j  ]+x.a[i  ][j  ]); // value at cell centre of (i-1,j)
-			ue = 0.5*(x.a[i+1][j  ]+x.a[i  ][j  ]); // c.c. value at (i,j)
-			vs = 0.5*(y.a[i  ][j  ]+y.a[i-1][j  ]); // value at SW corner of (i,j) cell
-			vn = 0.5*(y.a[i  ][j+1]+y.a[i-1][j+1]); // value at NW corner of (i,j) cell
-		}
-		else
-		{
-			uo = 0.5*(x.a[i  ][j-1]+x.a[i  ][j  ]); // value at SW corner of (i,j) cell
-			ue = 0.5*(x.a[i+1][j-1]+x.a[i+1][j  ]); // value at SE corner of (i,j) cell
-			vs = 0.5*(y.a[i  ][j-1]+y.a[i  ][j  ]); // c.c. value in the S cell of (i,j)
-			vn = 0.5*(y.a[i  ][j  ]+y.a[i  ][j+1]); // c.c. value in the (i,j) cell
-		}
-		// return the sum of fluxes of b INTO this cell - interpolate using QUICK scheme
-		return ( (uo*bho(b, i, j, -1, 0, uo) - ue*bho(b, i, j, 1, 0, ue))
-			   + (vs*bho(b, i, j, 0, -1, vs) - vn*bho(b, i, j, 0, 1, vn)) );
-	}
-	
-	// combined convection and diffusion problem solved explicitly without accounting for any external forces (e.g. grad(p))
-	void AdvDif(VectorField u0, float dt, float nu)
-	{
-		VectorField v = new VectorField(this);
-		for ( int j=1; j<m-1; j++)
-		{
-			for ( int i=1; i<n-1; i++)
-			{
-				// compute advection-diffusion problem using Euler time method given the old velocity field u0
-				v.x.a[i][j] = (advection(x, i, j) + nu*diffusion(x, i, j))*dt + u0.x.a[i][j];
-				v.y.a[i][j] = (advection(y, i, j) + nu*diffusion(y, i, j))*dt + u0.y.a[i][j];
-			}
-		}
-		this.eq(v);   
-	}
+  VectorField inv(){
+    VectorField g = new VectorField(this);
+    g.invEq();
+    return g;
+  }
 
-	float CFL(float nu)
-	{
-		// This computes a custom stability criterion, in a way similar to the Courant and Peclet numbers.
-		
-		// find the maximum velocity and store it in b
-		float b = abs(x.a[0][0])+abs(y.a[0][0]);
-		float c;
-		for ( int i=1; i<n-1; i++)
-		{
-			for ( int j=1; j<m-1; j++)
-			{ 
-				c = abs(x.a[i][j])+abs(y.a[i][j]);
-				if (c>b) b=c;
-			}
-		}
-		return 1./(b+3.*nu);
-	}
-  
-	VectorField times( VectorField b){
-		VectorField g = new VectorField(this);
-		g.timesEq(b);
-		return g;
-	}
+  VectorField laplacian(){
+    return new VectorField(x.laplacian(),y.laplacian());
+  }
 
-	VectorField times( float b){
-		VectorField g = new VectorField(this);
-		g.timesEq(b);
-		return g;
-	}
-
-	VectorField plus( VectorField b){
-		VectorField g = new VectorField(this);
-		g.plusEq(b);
-		return g;
-	}
-
-	VectorField minus( VectorField b){
-		VectorField g = new VectorField(this);
-		g.minusEq(b);
-		return g;
-	}
-
-	VectorField plus( float b){
-		VectorField g = new VectorField(this);
-		g.plusEq(b);
-		return g;
-	}  
-
-	VectorField inv(){ 
-		VectorField g = new VectorField(this);
-		g.invEq();
-		return g;
-	}
-
-	void eq( VectorField b ){ x.eq(b.x); y.eq(b.y);}
-	void eq( float b ){ x.eq(b); y.eq(b);}
-	void timesEq( VectorField b ){ x.timesEq(b.x); y.timesEq(b.y);}
-	void timesEq( float b ){ x.timesEq(b); y.timesEq(b);}
-	void plusEq( VectorField b ){ x.plusEq(b.x); y.plusEq(b.y);}
-	void plusEq( float b ){ x.plusEq(b); y.plusEq(b);}  
-	void plusEq( PVector b ){ x.plusEq(b.x); y.plusEq(b.y);}  
-	void minusEq( VectorField b ){ x.minusEq(b.x); y.minusEq(b.y);} 
-	
-	// advect each of the components of this field as simple scalar variables given an external
-	// velocity field b; may use either 1st or 2nd order accuracy implemented in Field.pde
-	void advect( float dt, VectorField b )
-	{
-		x.advect(dt,b);
-		y.advect(dt,b);
-	}
-	
-	void advect( float dt, VectorField b, VectorField b0 )
-	{
-		x.advect(dt,b,b0);
-		y.advect(dt,b,b0);
-	}
-	
-	void invEq(){ x.invEq(); y.invEq();}  
+  void eq( VectorField b ){ x.eq(b.x); y.eq(b.y);}
+  void eq( float b ){ x.eq(b); y.eq(b);}
+  void timesEq( VectorField b ){ x.timesEq(b.x); y.timesEq(b.y);}
+  void timesEq( float b ){ x.timesEq(b); y.timesEq(b);}
+  void plusEq( VectorField b ){ x.plusEq(b.x); y.plusEq(b.y);}
+  void plusEq( float b ){ x.plusEq(b); y.plusEq(b);}
+  void plusEq( PVector b ){ x.plusEq(b.x); y.plusEq(b.y);}
+  void minusEq( VectorField b ){ x.minusEq(b.x); y.minusEq(b.y);}
+  void advect( float dt, VectorField b ){ x.advect(dt,b); y.advect(dt,b);}
+  void advect( float dt, VectorField b, VectorField b0 ){ x.advect(dt,b,b0); y.advect(dt,b,b0);}
+  void invEq(){ x.invEq(); y.invEq();}
 }
-

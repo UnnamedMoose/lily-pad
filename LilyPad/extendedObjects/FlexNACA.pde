@@ -14,8 +14,8 @@ FloodPlot flood;
 float time=0;
 float[] a={0,.2,-.1};
 void setup(){
-  int n=(int)pow(2,6)+2; // number of grid points
-  size(400,400);         // display window size
+  int n=(int)pow(2,6);
+  size(400,400);      
   Window view = new Window(n,n);
 
   fish = new FlexNACA(n/4,n/2,n/3,0.20,0.25,1.2,1.,a,view);
@@ -30,7 +30,7 @@ void draw(){
   fish.update(time);
   flow.update(fish);
   flow.update2();
-  flood.display(flow.u.vorticity());
+  flood.display(flow.u.curl());
   fish.display();
 }
 
@@ -87,12 +87,12 @@ class FlexNACA extends NACA{
   void rotate( float dphi ){} // no rotation
 
   void update(float time) { // update time and coords
-    for ( int i=0; i<coords.size(); i++ ) coords.set(i,orig.coords.get(i).get());
+    for ( int i=0; i<coords.size(); i++ ) coords.set(i,orig.coords.get(i).copy());
     this.time = time;
     for ( PVector x: coords ) x.y += h(x.x);
     getOrth();
-    unsteady = true;
   }
+  boolean unsteady(){return true;}
   
 
 /* The wave is given by h = A(x)*sin(k*x-omega*t)

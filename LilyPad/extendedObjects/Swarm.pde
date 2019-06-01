@@ -12,7 +12,7 @@ CircleBody body;
 Swarm streaks;
 
 void setup(){
-  int n=(int)pow(2,6)+2; size(400,400);
+  int n=(int)pow(2,6); size(400,400);
   Window view = new Window(n,n);
   body = new CircleBody(n/3,n/2,n/8,view);
   flow = new BDIM(n,n,1,body);
@@ -42,10 +42,8 @@ class Swarm{
   boolean points=false, lines=true;
 
   Swarm( Window window ){ 
-    pSet = new ArrayList();
+    pSet = new ArrayList<Particle>();
     this.window = window;
-    this.imax = imax; 
-    this.lifeSpan = lifeSpan;
   }
 
   void update(VectorField u, VectorField u0 , float dt){
@@ -147,8 +145,10 @@ class InletSwarm extends Swarm{
 class StreakSwarm extends SourceSwarm{
   Particle pp;
 
-  StreakSwarm( Window window, PVector p ){
+  StreakSwarm( Window window, PVector p, color bodyColor ){
     super( window, p );
+    lifeSpan *= 10;
+    this.bodyColor = bodyColor;
     pSet.add(new Particle( p.x, p.y, bodyColor, window, lifeSpan));
     pp = new Particle( p.x, p.y, bodyColor, window, lifeSpan);
   }
@@ -160,26 +160,11 @@ class StreakSwarm extends SourceSwarm{
       Particle b = pp;
       if( pIter.hasNext() ) b = pSet.get(pIter.nextIndex());
       int d2 = window.pdx(sq(a.x.x-b.x.x)+sq(a.x.y-b.x.y));
-      if(d2>9) pIter.add( new Particle( 0.5*(a.x.x+b.x.x), 0.5*(a.x.y+b.x.y), bodyColor, window, lifeSpan, (a.step+b.step)/2 ) );
+      if(d2>9) {
+        pIter.add( new Particle( 0.5*(a.x.x+b.x.x), 0.5*(a.x.y+b.x.y), bodyColor, window, lifeSpan, (a.step+b.step)/2 ) );
+      }else if(d2<1) {
+        pIter.remove();
+      }
     }
-  }
-
-  void remove(){
-    while( pSet.get(0).step>lifeSpan ) pSet.remove(0);
-  } 
-  
-  void display(){
-    noFill();strokeWeight(4);
-    float f = 255./float(lifeSpan), h = hue(bodyColor);    
-    beginShape();
-    for( Particle a: pSet ){
-      stroke(h,255-a.step*f,255);
-      vertex(window.px(a.x.x), window.py(a.x.y));
-    }
-    stroke(h,255,255);
-    vertex(window.px(p.x), window.py(p.y));
-    endShape(OPEN);
   }
 }
-
-

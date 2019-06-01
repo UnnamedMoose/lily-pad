@@ -5,14 +5,13 @@
  
  it defines the position and motion of a convex body. 
  
- points added to the body shape must be added clockwise 
- so that the convexity can be tested.
+ points added to the body shape must be added counter
+ clockwise so that the convexity can be tested.
  
- basic operations such as translations and rotations are
- applied to the centroid and the array of points. 
- 
- the update function checks for mouse user interaction and
- updates the `unsteady' flag.
+ the easiest way to include dynamics is to use follow()
+ which follows the path variable (or mouse) or to use
+ react() which integrates the rigid body equations.
+ You can also translate() and rotate() directly.
  
 Example code:
  
@@ -29,11 +28,12 @@ void setup(){
 }
 void draw(){
   background(0);
-  body.update();
+  body.follow();
   body.display();
 }
 void mousePressed(){body.mousePressed();}
 void mouseReleased(){body.mouseReleased();}
+void mouseWheel(MouseEvent event){body.mouseWheel(event);}
 
 ********************************/
 
@@ -43,37 +43,24 @@ class Body {
   final color bodyOutline = #000000;
   final color vectorColor = #000000;
   PFont font = loadFont("Dialog.bold-14.vlw");
-  float phi=0, dphi=0, mass=1, I0=1, area=0;
-  int hx, hy;
-  ArrayList<PVector> coords;
+  float phi=0, dphi=0, dotphi=0, ddotphi=0;
+  float mass=1, I0=1, area=0;
+  ArrayList<PVector> coords=new ArrayList<PVector>();
   int n;
-  boolean unsteady, pressed, xfree=true, yfree=true, updated=true;
-  PVector xc, dxc;
+  boolean convex=false;
+  boolean pressed=false, xfree=true, yfree=true, pfree=true;
+  PVector xc, dxc=new PVector(), dotxc=new PVector(), ddotxc=new PVector();
+  PVector handle=new PVector(), ma=new PVector();
   OrthoNormal orth[];
   Body box;
 
   Body( float x, float y, Window window ) {
     this.window = window;
     xc = new PVector(x, y);
-    dxc = new PVector(0, 0);
-    coords = new ArrayList();
   }
 
   void add( float x, float y ) {
     coords.add( new PVector( x, y ) );
-    // remove concave points
-    for ( int i = 0; i<coords.size() && coords.size()>3; i++ ) {
-      PVector x1 = coords.get(i);
-      PVector x2 = coords.get((i+1)%coords.size());
-      PVector x3 = coords.get((i+2)%coords.size());
-      PVector t1 = PVector.sub(x1, x2);
-      PVector t2 = PVector.sub(x2, x3);
-      float a = atan2(t1.y, t1.x)-atan2(t2.y, t2.x);
-      if (sin(a)<0) {
-        coords.remove((i+1)%coords.size());
-        i=0;
-      }
-    }
   }
 
   void end(Boolean closed) {
@@ -84,8 +71,7 @@ class Body {
 
     // make the bounding box
     if (n>4) {
-      PVector mn = xc.get();
-      PVector mx = xc.get();
+      PVector mn = xc.copy(), mx = xc.copy();
       for ( PVector x: coords ) {
         mn.x = min(mn.x, x.x);
         mn.y = min(mn.y, x.y);
@@ -99,6 +85,15 @@ class Body {
       box.add(mx.x, mn.y);
       box.end();
     }
+    
+    // check for convexity
+    convex = true;
+    double_loop: for ( OrthoNormal oi : orth ) {
+      for ( OrthoNormal oj : orth ){
+        if(oi.distance(oj.cen.x,oj.cen.y)>0.001) {
+          convex = false; 
+          break double_loop;
+    }}}
   }
   void end() {
     end(true);
@@ -139,20 +134,19 @@ class Body {
   }
   void display( color C, Window window ) { // note: can display while adding
     //    if(n>4) box.display(#FFCC00);
-    fill(C); 
+    fill(C);
     //noStroke();
     stroke(bodyOutline);
     strokeWeight(1);
     beginShape();
     for ( PVector x: coords ) vertex(window.px(x.x), window.py(x.y));
     endShape(CLOSE);
-  }
+}
   void displayVector(PVector V) {
     displayVector(vectorColor, window, V, "Force", true);
   }
   void displayVector(color C, Window window, PVector V, String title, boolean legendOn) { // note: can display while adding
     //    if(n>4) box.display(#FFCC00);
-    float Vabs = sqrt(V.x*V.x+V.y*V.y);
     float Vscale=10;
     float circradius=6; //pix
     
@@ -168,8 +162,7 @@ class Body {
         textFont(font);
         fill(C);
         float spacing=20;
-        int x0 = window.x0, x1 = window.x0+window.dx;
-        int y0 = window.y0, y1 = window.y0+window.dy;
+        int x0 = window.x0, y1 = window.y0+window.dy;
         textAlign(LEFT,BASELINE);
         String ax = ""+V.x;
         String ay = ""+V.y;
@@ -179,19 +172,44 @@ class Body {
   }
 
   float distance( float x, float y ) { // in cells
-    float dis = -1e10;
-    if (n>4) { // check distance to bounding box
+    float dis;
+    if (n>4) { // distance to bounding box
       dis = box.distance(x, y);
       if (dis>3) return dis;
     }
-    // check distance to each line, choose max
-    for ( OrthoNormal o : orth ) dis = max(dis, o.distance(x, y));
-    return dis;
+    
+    if(convex){ // distance to convex body
+      // check distance to each line, choose max
+      dis = -1e10;
+      for ( OrthoNormal o : orth ) dis = max(dis, o.distance(x, y));
+      return dis;
+    } else {   // distance to non-convex body
+      // check distance to each line segment, choose min
+      dis = 1e10;
+      for( OrthoNormal o: orth ) dis = min(dis,o.distance(x,y,false));
+      return (wn(x,y)==0)?dis:-dis; // use winding to set inside/outside
+    }
   }
   int distance( int px, int py) {     // in pixels
     float x = window.ix(px);
     float y = window.iy(py);
     return window.pdx(distance( x, y ));
+  }
+
+  int wn( float x, float y){
+    // Winding number. If wn==0 the point is inside the body
+    int wn=0;
+    for ( int i = 0; i<coords.size()-1; i++ ){      
+      float yi = coords.get(i).y;    // y value of point i
+      float yi1 = coords.get(i+1).y; // y value of point i+1
+      OrthoNormal o = orth[i];       // segment from i to i+1
+      if(yi <= y){                   // check for positive crossing
+        if(yi1 > y && o.distance(x,y)>0) wn++;
+      }else{                         // check for negative crossing
+        if(yi1 <= y && o.distance(x,y)<0) wn--;
+      }
+    }
+    return wn;
   }
 
   PVector WallNormal(float x, float y  ) {
@@ -213,7 +231,6 @@ class Body {
     return wnormal;
   }
 
-
   float velocity( int d, float dt, float x, float y ) {
     // add the rotational velocity to the translational
     PVector r = new PVector(x, y);
@@ -222,53 +239,58 @@ class Body {
     else     return (dxc.y+r.x*dphi)/dt;
   }
 
+  boolean unsteady(){return (dxc.mag()!=0)|(dphi!=0);}
+
   void translate( float dx, float dy ) {
     dxc = new PVector(dx, dy);
     xc.add(dxc);
     for ( PVector x: coords ) x.add(dxc);
     for ( OrthoNormal o: orth   ) o.translate(dx, dy);
     if (n>4) box.translate(dx, dy);
-    updated = false;
   }
 
   void rotate( float dphi ) {
     this.dphi = dphi;
     phi = phi+dphi;
     float sa = sin(dphi), ca = cos(dphi);
-    for ( PVector x: coords ) rotate( x, sa, ca ); 
+    for ( PVector x: coords ) rotate( x, xc, sa, ca ); 
     getOrth(); // get new orthogonal projection
     if (n>4) box.rotate(dphi);
-    updated = false;
   }
-  void rotate( PVector x, float sa, float ca ) {
+  void rotate( PVector x, PVector xc, float sa, float ca ) {
     PVector z = PVector.sub(x, xc);
     x.x = ca*z.x-sa*z.y+xc.x;
     x.y = sa*z.x+ca*z.y+xc.y;
   }
-
-  void updatePositionOnly() {updated=true; update(); }
-  void update() {
-    if (pressed) {
-      this.translate( window.idx(mouseX-hx), window.idy(mouseY-hy) );
-      hx = mouseX;
-      hy = mouseY;
-    }
-    unsteady = (dxc.mag()!=0)|(dphi!=0);
-    if(updated){ dxc = new PVector(0,0); dphi = 0; }
-    updated = true;
+  void rotate( PVector x, float sa, float ca ) {rotate(x,new PVector(),sa,ca);}
+  
+  // Move body to path=(x,y,phi)
+  void follow(PVector path) {
+    PVector d = path.copy().sub(xc.copy().add(handle)); // distance to point;
+    d.z = (d.z-phi);                                    // arc length to angle
+    translate(d.x,d.y); rotate(d.z);                    // translate & rotate
   }
-
+  void follow() {
+    if(pressed) follow(new PVector(window.ix(mouseX),window.iy(mouseY)));
+  }
+  void follow(PVector path, PVector dpath){
+    follow(path);
+    dxc = new PVector(dpath.x, dpath.y);
+    dphi = dpath.z;
+  }
+  
   void mousePressed() {
     if (distance( mouseX, mouseY )<1) {
       pressed = true;
-      hx = mouseX;
-      hy = mouseY;
+      handle = new PVector(window.ix(mouseX),window.iy(mouseY)).sub(xc);
     }
   }
   void mouseReleased() {
     pressed = false;
-    dxc.set(0, 0, 0);
-    dphi = 0;
+    dxc = new PVector(); dphi = 0; // Don't include velocity
+  }
+  void mouseWheel(MouseEvent event) {
+    if (distance( mouseX, mouseY )<1) rotate(event.getCount()/PI/100);
   }
 
   PVector pressForce ( Field p ) {
@@ -289,16 +311,67 @@ class Body {
     return mom;
   }
 
-  // compute body reaction to applied force using 1st order Euler 
-  void react (PVector force, float moment, float dt1, float dt2) {
-    float dx,dy,dp;
-    dx = -dt2*(dt1+dt2)/2*force.x/mass + dt2/dt1*dxc.x;
-    dy = -dt2*(dt1+dt2)/2*force.y/mass + dt2/dt1*dxc.y; 
-    dp = -dt2*(dt1+dt2)/2*moment/I0 + dt2/dt1*dphi;
-    translate(xfree?dx:0, yfree?dy:0); 
-    rotate(dp);
+  float pressPower ( Field p, float dt ) {
+    float power = 0;
+    for ( OrthoNormal o: orth ) {
+      float x = o.cen.x, y = o.cen.y,
+            u = velocity( 1, dt, x, y ),
+            v = velocity( 2, dt, x, y ),
+            pdl = p.linear( x, y )*o.l;
+      power += pdl*(u*o.nx+v*o.ny);
+    }
+    return power;
   }
-  void react (PVector force, float dt1, float dt2) {react(force, 0, dt1, dt2);}
+
+  // compute body reaction to applied force and moment
+  void react (PVector force, float moment, float dt) {
+    /* X,Y */
+    if(xfree|yfree){
+      // rotate to body-fixed axis
+      float sa = sin(phi), ca = cos(phi);
+      rotate(force,-sa,ca);
+      rotate(ddotxc,-sa,ca);
+      // compute acceleration (in global axis)
+      ddotxc.x = (force.x+ma.x*ddotxc.x)/(mass+ma.x);
+      ddotxc.y = (force.y+ma.y*ddotxc.y)/(mass+ma.y);
+      rotate(ddotxc,sa,ca);
+      // compute velocity and delta
+      dotxc.add(ddotxc.copy().mult(dt));
+      dxc = dotxc.copy().mult(dt);
+      // translate
+      if(!xfree) {dxc.x=0; dotxc.x=0; ddotxc.x=0;}
+      if(!yfree) {dxc.y=0; dotxc.y=0; ddotxc.y=0;}
+      translate(dxc.x+0.5*ddotxc.x*sq(dt),dxc.y+0.5*ddotxc.y*sq(dt));
+    } else{
+      dxc=new PVector(); dotxc=new PVector(); ddotxc=new PVector();
+    }
+    /* Phi */
+    if(pfree){
+      // compute acceleration & velocity
+      ddotphi = (moment+ma.z*ddotphi)/(I0+ma.z);
+      dotphi += ddotphi*dt;
+      // compute delta and position
+      dphi = dotphi*dt;
+      rotate(dphi+0.5*ddotphi*sq(dt));
+    } else{
+      dphi=0; dotphi=0; ddotphi=0;
+    }
+  }
+  void react (BDIM flow) {
+    PVector f = pressForce(flow.p).mult(-1);
+    float m = pressMoment(flow.p)*(-1);
+    react(f,m,flow.dt);
+  }
+
+  // check if motion is within box limits
+  boolean check_phi_free(float m, float phi_high, float phi_low){
+    return !(phi<phi_low & (m<0 | dotphi<0)) & 
+           !(phi>phi_high & (m>0 | dotphi>0));
+  }
+  boolean check_y_free(float fy, float y_high, float y_low){
+    return !(xc.y<y_low & (fy<0 | dotxc.y<0)) & 
+           !(xc.y>y_high & (fy>0 | dotxc.y>0));
+  }
 
 }
 /********************************
@@ -313,13 +386,15 @@ class EllipseBody extends Body {
   EllipseBody( float x, float y, float _h, float _a, Window window) {
     super(x, y, window);
     h = _h; 
-    a = _a;
+    a = 1./_a;
     float dx = 0.5*h*a, dy = 0.5*h;
     for ( int i=0; i<m; i++ ) {
       float theta = -TWO_PI*i/((float)m);
       add(xc.x+dx*cos(theta), xc.y+dy*sin(theta));
     }
     end(); // finalize shape
+
+    ma = new PVector(PI*sq(dy),PI*sq(dx),0.125*PI*sq(sq(dx)-sq(dy)));
   }
 }
 /* CircleBody
@@ -337,8 +412,6 @@ class CircleBody extends EllipseBody {
   void rotate(float _dphi) {
     dphi = _dphi;
     phi = phi+dphi;
-    updated = false;
   }
   
 }
-

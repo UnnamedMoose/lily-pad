@@ -94,7 +94,6 @@ class UnsteadyLiftControl {
   void setSys(float[] A1, float[] A2, float[] A3, float[] A4, float[] B, float[] Ct, float D, int nX) {
     this.Xhat = new float[nX];
     this.nX = nX;
-    this.A0 = A0;
     this.A1 = A1;
     this.A2 = A2;
     this.A3 = A3;
@@ -102,7 +101,6 @@ class UnsteadyLiftControl {
     this.B = B;
     this.Ct = Ct;
     this.D = D;
-    this.Kt = Kt;
   }
   void setGains(float[] Kt, float[] L, int nX) {
     this.L = L;
@@ -145,7 +143,6 @@ class UnsteadyLiftControl {
     float dthdot0 = thddot0*dtr;
     
     //Integrate
-    float th1 = th+dth0;
     float thdot1 = thdot+dthdot0;
     float[] Xhat1 = estimator(lift,thddot0, Xhat);
 
@@ -172,14 +169,12 @@ class UnsteadyLiftControl {
     flow.u.x.a[mouseX/zoom][mouseY/zoom+2] += 1;
     }
      
-    foil.update();
-    foil.unsteady = true;
     flow.update(foil);
     flow.update2(foil);
     t += dt;
   }
   void display() {
-    flood.display(flow.u.vorticity());
+    flood.display(flow.u.curl());
     foil.display();
     foil.displayVector(foil.pressForce(flow.p));
     
@@ -196,4 +191,3 @@ class UnsteadyLiftControl {
       text("Liftset: "+ nfs(yd,2,2),x1-spacing,y1-spacing);
   }
 }
-

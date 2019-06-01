@@ -1,39 +1,38 @@
 /*********************************************************
-                  Main Window! 
+                  Main Window!
 
 Click the "Run" button to Run the simulation.
 
-Change the geometry, flow conditions, numercial parameters
- visualizations and measurments from this window. 
+Change the geometry, flow conditions, numerical parameters
+visualizations and measurements from this window.
+
+This screen has an example. Other examples are found at
+the top of each tab. Copy/paste them here to run, but you
+can only have one setup & run at a time.
 
 *********************************************************/
-
-// ====================================
-// DEFAULT CODE
+// Circle that can be dragged by the mouse
 BDIM flow;
-CircleBody body;
+Body body;
 FloodPlot flood;
 
 void setup(){
-  int n=(int)pow(2,6)+2; // number of grid points - Need a multiple of 2 for the multi-grid solver
-  size(400,400);         // display window size
+  size(700,700);                             // display window size
+  int n=(int)pow(2,7);                       // number of grid points
+  float L = n/8.;                            // length-scale in grid units
   Window view = new Window(n,n);
 
-  body = new CircleBody(n/3,n/2,n/8,view); // define geometry - circle
-//  flow = new BDIM(n,n,1.5,body);           // solve for flow using BDIM
-  flow = new BDIM(n,n,0,body,0.01,true);   // QUICK with adaptive dt
-  flood = new FloodPlot(view);
-  flood.range = new Scale(-.75,.75);
-  flood.setLegend("vorticity");
+  body = new CircleBody(n/3,n/2,L,view);     // define geom
+  flow = new BDIM(n,n,1.5,body);             // solve for flow using BDIM
+  flood = new FloodPlot(view);               // initialize a flood plot...
+  flood.setLegend("vorticity",-.5,.5);       //    and its legend
 }
 void draw(){
-  body.update();
-  flow.update(body);
-  flow.update2();
-  flood.display(flow.u.vorticity());
-  body.display();
+  body.follow();                             // update the body
+  flow.update(body); flow.update2();         // 2-step fluid update
+  flood.display(flow.u.curl());              // compute and display vorticity
+  body.display();                            // display the body
 }
-void mousePressed(){body.mousePressed();}
-void mouseReleased(){body.mouseReleased();}
-
-/*======================================*/
+void mousePressed(){body.mousePressed();}    // user mouse...
+void mouseReleased(){body.mouseReleased();}  // interaction methods
+void mouseWheel(MouseEvent event){body.mouseWheel(event);}

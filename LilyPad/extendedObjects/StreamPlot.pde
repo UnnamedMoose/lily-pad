@@ -9,8 +9,8 @@ CircleBody body;
 StreamPlot flood;
 
 void setup(){
-  int n=(int)pow(2,6)+2; // number of grid points
-  int nlines = 15;        // number of streamlines
+  int n=(int)pow(2,6);   // number of grid points
+  int nlines = 15;       // number of streamlines
   size(400,400);         // display window size
   Window view = new Window(n,n);
 
@@ -27,7 +27,7 @@ void draw(){
   body.update();
   flow.update(body);
   flow.update2();
-  flood.display(flow.u.vorticity());
+  flood.display(flow.u.curl());
   body.display();
 }
 void mousePressed(){body.mousePressed();}
@@ -81,4 +81,3 @@ class StreamPlot extends FloodPlot {
       legend.display(minv, maxv);
   }
 }
-

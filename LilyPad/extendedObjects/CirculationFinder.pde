@@ -15,33 +15,28 @@
  CirculationFinder cf;
  
  void setup(){
- int n=(int)pow(2,7)+2; // number of grid points
- float d = n/8;
- size(400,400);         // display window size
- Window view = new Window(n,n);
+   int n=(int)pow(2,7);
+   float d = n/12;
+   size(800,400);
+   Window view = new Window(n,n/2);
  
- body = new CircleBody(n/3,n/2,d,view); // define geom
- flow = new BDIM(n,n,1.5,body);           // solve for flow using BDIM
+   body = new CircleBody(n/4,n/4,d,view);
+   flow = new BDIM(n,n/2,1.5,body);
  
- cf = new CirculationFinder(flow,body,view);
- cf.setAnnotate(true,1.0/d);
+   cf = new CirculationFinder(flow,body,view);
+   cf.setAnnotate(true,1.0/d);
  
- flood = new FloodPlot(view);
- flood.range = new Scale(-.75,.75);
- flood.setLegend("vorticity");
+   flood = new FloodPlot(view);
+   flood.setLegend("vorticity",-0.5,0.5);
  }
  void draw(){
- body.update();
- flow.update(body);
- flow.update2();
- cf.update();
+   flow.update();flow.update2();
+   cf.update();
  
- flood.display(flow.u.vorticity());
- body.display();
- cf.display();
+   flood.display(flow.u.curl());
+   body.display();
+   cf.display();
  }
- void mousePressed(){body.mousePressed();}
- void mouseReleased(){body.mouseReleased();}
  ***********************************/
 
 class CirculationFinder {
@@ -77,7 +72,7 @@ class CirculationFinder {
     //Updates the vortex cores
 
     // +++++++++++++++ Step 1 - Finds local maxima in vorticity that also satisfy requirements of minimum vorticity, Qcriterion, and distance from body
-    vorticity = flow.u.vorticity();
+    vorticity = flow.u.curl();
     float[][] w = vorticity.a;
     cores.clear();
     for ( int i=1 ; i<flow.n-1 ; i++ ) {
@@ -137,7 +132,7 @@ class CirculationFinder {
   void display() {
     //Displays the vortex cores, and labels the circulation if specified
     int G = #000393, S = #0003A3, w = #0003C9, txtpnt = 12;
-    PImage img = get();
+    PImage img = copy();
     img.loadPixels();
     if (cores.size()>0) {
       for ( VortexCore c: cores ) {
@@ -256,4 +251,3 @@ class VortexCore {
     this(xc.x, xc.y, r, w, 0, 0);
   }
 }
-

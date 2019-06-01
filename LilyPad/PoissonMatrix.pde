@@ -5,10 +5,10 @@ Holds values and operators for a Poisson matrix
 
    A*x = div{lower*grad{x}} = b      (1)
 
-where lower is a VectorField which are the 
+where lower is a VectorField which are the
 lower diagonal components of the matrix A.
 From Eq.1 the matrix is symmetric and the
-diagonals are given by 
+diagonals are given by
 
   sum{a_{i,j},i} = 0 forall j       (2)
 
@@ -30,7 +30,7 @@ void setup(){
   Ax.display(-2,2);
 }
 ***********************************/
-public class PoissonMatrix 
+public class PoissonMatrix
 {
 	int n, m; // size of the matrix
 	VectorField lower; // lower diagonal coefficients
@@ -44,7 +44,7 @@ public class PoissonMatrix
 		this.lower = new VectorField(lower);
 		diagonal = new Field(n,m);
 		inv = new Field(n,m,0,1);
-		
+
 		for ( int i=1 ; i<n-1 ; i++ )
 		{
 			for ( int j=1 ; j<m-1 ; j++ )
@@ -81,4 +81,7 @@ public class PoissonMatrix
 	Field residual( Field b, Field x ) {
 		return b.plus(this.times(x).times(-1)); }
 
+  Field residual( Field b, Field x ){
+    return b.minus(this.times(x));
+  }
 }
